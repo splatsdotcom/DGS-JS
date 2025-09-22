@@ -60,6 +60,29 @@ export class SplatPlayer extends HTMLElement
 
 		this.#gaussians = this.#createGaussians(); //TEMP!
 
+		//input handlers:
+		//---------------
+		window.addEventListener('keydown', (e) => { this.#keys[e.code] = true; });
+		window.addEventListener('keyup',   (e) => { this.#keys[e.code] = false; });
+
+		this.#canvas.addEventListener('mousedown', (e) => {
+			this.#isDragging = true;
+			this.#lastMouse = [e.clientX, e.clientY];
+		});
+		window.addEventListener('mouseup', () => { this.#isDragging = false; });
+		window.addEventListener('mousemove', (e) => {
+			if(this.#isDragging) {
+				const dx = e.clientX - this.#lastMouse[0];
+				const dy = e.clientY - this.#lastMouse[1];
+				this.#lastMouse = [e.clientX, e.clientY];
+
+				const sensitivity = 0.0025;
+				this.#camYaw   -= dx * sensitivity;
+				this.#camPitch -= dy * sensitivity;
+				this.#camPitch = Math.max(-Math.PI/2+0.01, Math.min(Math.PI/2-0.01, this.#camPitch));
+			}
+		});
+
 		//begin rendering:
 		//---------------
 		requestAnimationFrame((t) => {
@@ -75,9 +98,17 @@ export class SplatPlayer extends HTMLElement
 	#geomBufs = null;
 	#paramsBuf = null;
 
-	#gaussians = null; //TEMP!
+	#lastRenderTime = null;
+
+	//TEMP:
+	#gaussians = null;
 	#gaussianBuf = null;
-	#camAngle = 0.0; //TEMP!
+	#camPos   = vec3.fromValues(3, 3, 3);
+	#camYaw   = -3 * Math.PI / 4;
+	#camPitch = -Math.PI / 4;
+	#keys     = {};
+	#isDragging = false;
+	#lastMouse = [0, 0];
 
 	//-------------------------//
 
@@ -228,17 +259,52 @@ export class SplatPlayer extends HTMLElement
 		};
 	}
 
+	#updateCamera(dt)
+	{
+		const speed = 2.5 * dt;
+		const forward = vec3.fromValues(
+			Math.cos(this.#camPitch) * Math.sin(this.#camYaw),
+			Math.sin(this.#camPitch),
+			Math.cos(this.#camPitch) * Math.cos(this.#camYaw)
+		);
+		const right = vec3.fromValues(
+			Math.sin(this.#camYaw - Math.PI/2),
+			0,
+			Math.cos(this.#camYaw - Math.PI/2)
+		);
+
+		if(this.#keys["KeyW"]) vec3.scaleAndAdd(this.#camPos, this.#camPos, forward, speed);
+		if(this.#keys["KeyS"]) vec3.scaleAndAdd(this.#camPos, this.#camPos, forward, -speed);
+		if(this.#keys["KeyA"]) vec3.scaleAndAdd(this.#camPos, this.#camPos, right, -speed);
+		if(this.#keys["KeyD"]) vec3.scaleAndAdd(this.#camPos, this.#camPos, right, speed);
+		if(this.#keys["Space"])     this.#camPos[1] += speed;
+		if(this.#keys["ShiftLeft"]) this.#camPos[1] -= speed;
+	}
+
+
 	#render(timestamp)
 	{
+		//update camera:
+		//---------------
+		var dt = 0.0;
+		if(this.#lastRenderTime)
+			dt = timestamp - this.#lastRenderTime;
+
+		this.#lastRenderTime = timestamp;
+		this.#updateCamera(dt / 1000.0);
+
 		//create cam/proj matrices:
 		//---------------
 
 		//TEMP!!! we want these supplied by user eventually!
 		
-		this.#camAngle += 0.01;
-		const eye = vec3.fromValues(Math.sin(this.#camAngle)*5, 2, Math.cos(this.#camAngle)*5);
+		const target = vec3.create();
+		target[0] = this.#camPos[0] + Math.cos(this.#camPitch) * Math.sin(this.#camYaw);
+		target[1] = this.#camPos[1] + Math.sin(this.#camPitch);
+		target[2] = this.#camPos[2] + Math.cos(this.#camPitch) * Math.cos(this.#camYaw);
+
 		const view = mat4.create();
-		mat4.lookAt(view, eye, [0,0,0], [0,1,0]);
+		mat4.lookAt(view, this.#camPos, target, [0,1,0]);
 
 		const proj = mat4.create();
 		const fovY = Math.PI / 4;
@@ -281,7 +347,7 @@ export class SplatPlayer extends HTMLElement
 		pass.setIndexBuffer(this.#geomBufs.index, 'uint16');
 		pass.setBindGroup(0, bindGroups.gaussian);
 
-		const pointCount = 2;
+		const pointCount = 4;
 		pass.drawIndexed(6, pointCount); //TEMP!
 
 		pass.end();
@@ -353,13 +419,23 @@ export class SplatPlayer extends HTMLElement
 		return [
 			this.#packGaussian(
 				mat3.identity(mat3.create()),
-				vec3.fromValues(0.5, 0.0, 0.0),
-				vec4.fromValues(1.0, 0.0, 0.0, 1.0)
+				vec3.fromValues(0.75, 0.0, 0.0),
+				vec4.fromValues(1.0, 0.0, 0.0, 0.5)
 			),
 			this.#packGaussian(
 				mat3.identity(mat3.create()),
-				vec3.fromValues(-0.5, 0.0, 0.0),
-				vec4.fromValues(0.0, 0.0, 1.0, 1.0)
+				vec3.fromValues(-0.75, 0.0, 0.0),
+				vec4.fromValues(0.0, 0.0, 1.0, 0.5)
+			),
+			this.#packGaussian(
+				mat3.identity(mat3.create()),
+				vec3.fromValues(0.0, 0.0, 0.75),
+				vec4.fromValues(0.0, 1.0, 0.0, 0.5)
+			),
+			this.#packGaussian(
+				mat3.identity(mat3.create()),
+				vec3.fromValues(0.0, 0.0, -0.75),
+				vec4.fromValues(1.0, 1.0, 0.0, 0.5)
 			)
 		];
 	}
