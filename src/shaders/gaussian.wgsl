@@ -15,9 +15,9 @@ struct Params
 
 struct Gaussian
 {
-	cov: mat3x3f,
+	cov: vec3u,
+	color: u32,
 	mean: vec3f
-	// color: vec3f
 };
 
 struct VertexOutput 
@@ -60,6 +60,18 @@ fn vs_main(@location(0) quadPos: vec2<f32>, @builtin(instance_index) id: u32) ->
 		return out;
 	}
 
+	//unpack covariance matrix:
+	//---------------
+    let c0 = unpack2x16float(g.cov.x);
+    let c1 = unpack2x16float(g.cov.y);
+    let c2 = unpack2x16float(g.cov.z);
+
+	let cov = mat3x3f(
+		vec3f(c0.x, c0.y, c1.x),
+		vec3f(c0.y, c1.y, c2.x),
+		vec3f(c1.x, c2.x, c2.y)
+	);
+
 	//project covariance matrix to 2D:
 	//---------------
 	let J = mat3x3f(
@@ -73,7 +85,7 @@ fn vs_main(@location(0) quadPos: vec2<f32>, @builtin(instance_index) id: u32) ->
 		u_params.view[1].xyz,
 		u_params.view[2].xyz
 	)) * J;
-	let cov2d = transpose(T) * g.cov * T;
+	let cov2d = transpose(T) * cov * T;
 
 	//compute eigenvectors/eigenvalues:
 	//---------------
@@ -104,7 +116,8 @@ fn vs_main(@location(0) quadPos: vec2<f32>, @builtin(instance_index) id: u32) ->
 		0.0, 1.0
 	);
 
-	out.color = vec4f(clamp(clipPos.z / clipPos.w + 1.0, 0.0, 1.0));
+	let color = unpack4x8unorm(g.color);
+	out.color = clamp(clipPos.z / clipPos.w + 1.0, 0.0, 1.0) * color;
 
 	return out;
 }

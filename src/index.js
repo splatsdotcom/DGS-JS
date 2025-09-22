@@ -6,10 +6,11 @@
 const CANVAS_RESOLUTION_SCALE = 2;
 
 const SIZEOF_FLOAT32 = Float32Array.BYTES_PER_ELEMENT;
+const SIZEOF_UINT32  = Uint32Array.BYTES_PER_ELEMENT;
 
 //-------------------------//
 
-import { mat4, mat3, vec3 } from 'gl-matrix';
+import { mat3, mat4, vec3, vec4 } from 'gl-matrix';
 import shaderCode from './shaders/gaussian.wgsl?raw';
 
 //-------------------------//
@@ -57,7 +58,7 @@ export class SplatPlayer extends HTMLElement
 		this.#geomBufs = this.#createGeometryBuffers();
 		this.#paramsBuf = this.#createParamsBuffer();
 
-		this.#gaussianBuf = this.#createGaussianBuffer(); //TEMP!
+		this.#gaussians = this.#createGaussians(); //TEMP!
 
 		//begin rendering:
 		//---------------
@@ -74,7 +75,8 @@ export class SplatPlayer extends HTMLElement
 	#geomBufs = null;
 	#paramsBuf = null;
 
-	#gaussianBuf = null; //TEMP!
+	#gaussians = null; //TEMP!
+	#gaussianBuf = null;
 	#camAngle = 0.0; //TEMP!
 
 	//-------------------------//
@@ -250,6 +252,11 @@ export class SplatPlayer extends HTMLElement
 		const focalLengths = [fx, fy];
 		const viewPort = [this.#canvas.width, this.#canvas.height];
 
+		//sort gaussians:
+		//---------------
+		const gaussians = this.#sortGaussians(view, this.#gaussians);
+		this.#uploadGaussians(gaussians);
+
 		//update bufs + get bind groups:
 		//---------------
 		this.#updateParamsBuffer(view, proj, focalLengths, viewPort);
@@ -274,7 +281,7 @@ export class SplatPlayer extends HTMLElement
 		pass.setIndexBuffer(this.#geomBufs.index, 'uint16');
 		pass.setBindGroup(0, bindGroups.gaussian);
 
-		const pointCount = 1;
+		const pointCount = 2;
 		pass.drawIndexed(6, pointCount); //TEMP!
 
 		pass.end();
@@ -287,26 +294,108 @@ export class SplatPlayer extends HTMLElement
 		});
 	}
 
-
-	//TEMP! just setting up some test gaussians for now
-	#createGaussianBuffer()
+	#packGaussian(cov, mean, color) 
 	{
-		let alignedMat3 = (m) => {
-			return new Float32Array([...m.slice(0, 3), 0.0, ...m.slice(3, 6), 0.0, ...m.slice(6, 9), 0.0]);
-		};
+		let data = new ArrayBuffer(8 * 4);
+		let dataUint  = new Uint32Array (data);
+		let dataFloat = new Float32Array(data);
 
-		const cov = mat3.identity(mat3.create());
-		const mean = vec3.zero(vec3.create());
+		function float32ToFloat16(val) 
+		{
+			const floatView = new Float32Array(1);
+			const int32View = new Uint32Array(floatView.buffer);
+			floatView[0] = val;
+			const x = int32View[0];
+			let bits = (x >> 16) & 0x8000; // sign
+			let m = (x & 0x7fffff) >> 13;
+			let e = ((x >> 23) & 0xff) - 127 + 15;
+			if (e <= 0) { return bits; }
+			if (e >= 31) { return bits | 0x7c00 | m; }
 
-		const gaussianBuffer = device.createBuffer({
-			size: 4 * 3 * Float32Array.BYTES_PER_ELEMENT + 4 * Float32Array.BYTES_PER_ELEMENT,
+			return bits | (e << 10) | (m & 0x3ff);
+		}
+
+		function pack2x16half(f1, f2) 
+		{
+			return (float32ToFloat16(f2) << 16) | float32ToFloat16(f1);
+		}
+
+		dataUint.set([
+			pack2x16half(cov[0], cov[1]),
+			pack2x16half(cov[2], cov[4]),
+			pack2x16half(cov[5], cov[8])
+		], 0); //covariance
+
+		const colorU32 = (
+			(color[3] * 255) << 24 |
+			(color[2] * 255) << 16 |
+			(color[1] * 255) << 8  |
+			(color[0] * 255)
+		) >>> 0;
+		dataUint.set(
+			[colorU32],
+			3
+		); //color
+
+		dataFloat.set(
+			mean, 
+			4
+		); //mean
+
+		return data;
+	}
+
+
+	// ------ TEMP -------
+
+	#createGaussians()
+	{
+		return [
+			this.#packGaussian(
+				mat3.identity(mat3.create()),
+				vec3.fromValues(0.5, 0.0, 0.0),
+				vec4.fromValues(1.0, 0.0, 0.0, 1.0)
+			),
+			this.#packGaussian(
+				mat3.identity(mat3.create()),
+				vec3.fromValues(-0.5, 0.0, 0.0),
+				vec4.fromValues(0.0, 0.0, 1.0, 1.0)
+			)
+		];
+	}
+
+	#sortGaussians(view, gaussians)
+	{
+		const camPos = vec4.transformMat4(vec4.create(), vec4.fromValues(0.0, 0.0, 0.0, 1.0), mat4.invert(mat4.create(), view));
+
+		let keys = [];
+		for(let i = 0; i < gaussians.length; i++)
+		{
+			let floats = new Float32Array(gaussians[i]);
+			let mean = vec3.fromValues(floats[4], floats[5], floats[6]);
+			let to = vec3.sub(vec3.create(), camPos, mean);
+
+			keys.push({
+				dist: vec3.squaredLength(to),
+				gaussian: gaussians[i]
+			});
+		}
+
+		keys.sort((a, b) => a.dist - b.dist);
+		return keys.map((k) => k.gaussian);
+	}
+
+	#uploadGaussians(gaussians)
+	{
+		const gaussianSize = 8 * SIZEOF_FLOAT32;
+
+		this.#gaussianBuf = device.createBuffer({
+			size: gaussians.length * gaussianSize,
 			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
 		});
-		device.queue.writeBuffer(gaussianBuffer, 0, alignedMat3(cov));
-		device.queue.writeBuffer(gaussianBuffer, 4 * 3 * Float32Array.BYTES_PER_ELEMENT, mean);
 
-
-		return gaussianBuffer;
+		for(let i = 0; i < gaussians.length; i++)
+			device.queue.writeBuffer(this.#gaussianBuf, i * gaussianSize, gaussians[i]);
 	}
 }
 
