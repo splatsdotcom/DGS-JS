@@ -75,7 +75,7 @@ fn vs_main(@location(0) quadPos: vec2<f32>, @builtin(instance_index) id: u32) ->
 	//project covariance matrix to 2D:
 	//---------------
 	let J = mat3x3f(
-        u_params.focalLengths.x / camPos.z, 0.0,                                 -(u_params.focalLengths.x * camPos.x) / (camPos.z * camPos.z),
+        -u_params.focalLengths.x / camPos.z, 0.0,                                 (u_params.focalLengths.x * camPos.x) / (camPos.z * camPos.z),
         0.0,                                -u_params.focalLengths.y / camPos.z,  (u_params.focalLengths.y * camPos.y) / (camPos.z * camPos.z),
         0.0,                                0.0,                                  0.0
 	);
