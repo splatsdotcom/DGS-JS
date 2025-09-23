@@ -36,7 +36,7 @@ struct VertexOutput
 //-------------------------//
 
 @vertex
-fn vs_main(@location(0) quadPos: vec2<f32>, @builtin(instance_index) id: u32) -> VertexOutput 
+fn vs_main(@location(0) quadPos: vec2<f32>, @location(1) id: u32) -> VertexOutput 
 {
 	//TODO: do most of this work in a preprocess shader!
 

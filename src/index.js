@@ -11,6 +11,7 @@ const SIZEOF_UINT32  = Uint32Array.BYTES_PER_ELEMENT;
 //-------------------------//
 
 import { mat3, mat4, vec3, vec4 } from 'gl-matrix';
+import MGSModule from './wasm/mgs.js'
 import shaderCode from './shaders/gaussian.wgsl?raw';
 
 //-------------------------//
@@ -23,6 +24,8 @@ const device = await adapter?.requestDevice();
 
 if(!device)
 	throw new Error("Failed to initialize GPUDevice");
+
+const MGS = await MGSModule();
 
 //-------------------------//
 
@@ -42,13 +45,6 @@ export class SplatPlayer extends HTMLElement
 
 	async connectedCallback() 
 	{
-		const response = await fetch('point_cloud.ply');
-		if(!response.ok)
-			throw new Error("asdf");
-		console.log(response);
-		this.#gaussians = this.#processPlyBuffer(await response.arrayBuffer());
-		this.#uploadGaussians(this.#gaussians);
-
 		//handle window resize:
 		//---------------
 		let onResize = () => {
@@ -70,7 +66,7 @@ export class SplatPlayer extends HTMLElement
 
 		//input handlers:
 		//---------------
-		window.addEventListener('keydown', (e) => { this.#keys[e.code] = true; if(e.code == 'KeyP') { this.#gaussians = this.#sortGaussians(this.lastView, this.#gaussians); this.#uploadGaussians(this.#gaussians); } });
+		window.addEventListener('keydown', (e) => { this.#keys[e.code] = true;  });
 		window.addEventListener('keyup',   (e) => { this.#keys[e.code] = false; });
 
 		this.#canvas.addEventListener('mousedown', (e) => {
@@ -91,6 +87,30 @@ export class SplatPlayer extends HTMLElement
 			}
 		});
 
+		//initialize gaussians:
+		//---------------
+		const fetchResponse = await fetch('point_cloud.ply'); //TODO: dont hardcode this!
+		if(!fetchResponse.ok)
+			throw new Error("Failed to fetch test .ply");
+
+		const plyBuf = await fetchResponse.arrayBuffer()
+
+		const loadStartTime = performance.now();
+
+		this.#gaussians = MGS.loadPlyPacked(plyBuf)
+		this.#gaussianIndices = this.#gaussians.sortedIndices(this.#camPos[0], this.#camPos[1], this.#camPos[2]);
+
+		const loadEndTime = performance.now();
+		console.log(`PLY loading took ${loadEndTime - loadStartTime}ms`);
+
+		const uploadStartTime = performance.now();
+
+		this.#uploadGaussians();
+		this.#uploadGaussianIndices();
+
+		const uploadEndTime = performance.now();
+		console.log(`GPU upload took ${uploadEndTime - uploadStartTime}ms`);
+
 		//begin rendering:
 		//---------------
 		requestAnimationFrame((t) => {
@@ -106,17 +126,25 @@ export class SplatPlayer extends HTMLElement
 	#geomBufs = null;
 	#paramsBuf = null;
 
+	#gaussians = null;
+	#gaussianIndices = null;
+
+	#gaussianBuf = null;
+	#gaussianIndexBuf = null;
+
 	#lastRenderTime = null;
 
 	//TEMP:
-	#gaussians = null;
-	#gaussianBuf = null;
 	#camPos   = vec3.fromValues(3, 3, 3);
+	#lastCamPos = vec3.copy(vec3.create(), this.#camPos);
 	#camYaw   = -3 * Math.PI / 4;
 	#camPitch = -Math.PI / 4;
 	#keys     = {};
 	#isDragging = false;
 	#lastMouse = [0, 0];
+
+	#sorting = false;
+	#startSortingTime = 0.0;
 
 	//-------------------------//
 
@@ -147,12 +175,22 @@ export class SplatPlayer extends HTMLElement
 			vertex: {
 				module: shaderModule,
 				entryPoint: 'vs_main',
-				buffers: [{
-					arrayStride: 2 * SIZEOF_FLOAT32,
-					attributes: [{ 
-						shaderLocation: 0, offset: 0, format: 'float32x2' //position
-					}]
-				}]
+				buffers: [
+					{
+						stepMode: 'vertex',
+						arrayStride: 2 * SIZEOF_FLOAT32,
+						attributes: [{ 
+							shaderLocation: 0, offset: 0, format: 'float32x2' //position
+						}]
+					},
+					{
+						stepMode: 'instance',
+						arrayStride: SIZEOF_UINT32,
+						attributes: [{
+							shaderLocation: 1, offset: 0, format: 'uint32' //gaussian index
+						}]
+					}
+				]
 			},
 			fragment: {
 				module: shaderModule,
@@ -301,6 +339,37 @@ export class SplatPlayer extends HTMLElement
 		this.#lastRenderTime = timestamp;
 		this.#updateCamera(dt / 1000.0);
 
+		//sort gaussians:
+		//---------------
+
+		//TEMP!!! figure out a better way to do this
+
+		if(vec3.distance(this.#camPos, this.#lastCamPos) > 1.0 && !this.#sorting)
+		{
+			this.#gaussians.sortIndicesAsync(this.#camPos[0], this.#camPos[1], this.#camPos[2]);
+
+			this.#sorting = true;
+			this.#startSortingTime = performance.now();
+
+			vec3.copy(this.#lastCamPos, this.#camPos);
+		}
+
+		if(this.#sorting)
+		{
+			let indices = this.#gaussians.sortIndicesAsyncRetrieve();
+
+			if(indices)
+			{
+				this.#sorting = false;
+
+				console.log(`gaussian sorting took ${performance.now() - this.#startSortingTime}ms`);
+
+				this.#gaussianIndices.delete();
+				this.#gaussianIndices = indices;
+				this.#uploadGaussianIndices();
+			}
+		}
+
 		//create cam/proj matrices:
 		//---------------
 
@@ -327,11 +396,6 @@ export class SplatPlayer extends HTMLElement
 		const focalLengths = [fx, fy];
 		const viewPort = [this.#canvas.width, this.#canvas.height];
 
-		//sort gaussians:
-		//---------------
-		const gaussians = this.#gaussians;//this.#sortGaussians(view, this.#gaussians);
-		// this.#uploadGaussians(gaussians);
-
 		//update bufs + get bind groups:
 		//---------------
 		this.#updateParamsBuffer(view, proj, focalLengths, viewPort);
@@ -353,10 +417,11 @@ export class SplatPlayer extends HTMLElement
 
 		pass.setPipeline(this.#gaussianPipeline);
 		pass.setVertexBuffer(0, this.#geomBufs.vertex);
+		pass.setVertexBuffer(1, this.#gaussianIndexBuf);
 		pass.setIndexBuffer(this.#geomBufs.index, 'uint16');
 		pass.setBindGroup(0, bindGroups.gaussian);
 
-		pass.drawIndexed(6, gaussians.length); //TEMP!
+		pass.drawIndexed(6, this.#gaussians.count());
 
 		pass.end();
 		device.queue.submit([encoder.finish()]);
@@ -469,17 +534,29 @@ export class SplatPlayer extends HTMLElement
 		return keys.map((k) => k.gaussian);
 	}
 
-	#uploadGaussians(gaussians)
+	#uploadGaussians()
 	{
 		const gaussianSize = 8 * SIZEOF_FLOAT32;
-
 		this.#gaussianBuf = device.createBuffer({
-			size: gaussians.length * gaussianSize,
+			label: 'gaussians',
+
+			size: this.#gaussians.count() * gaussianSize,
 			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
 		});
 
-		for(let i = 0; i < gaussians.length; i++)
-			device.queue.writeBuffer(this.#gaussianBuf, i * gaussianSize, gaussians[i]);
+		device.queue.writeBuffer(this.#gaussianBuf, 0, this.#gaussians.getBuffer());
+	}
+
+	#uploadGaussianIndices()
+	{
+		this.#gaussianIndexBuf = device.createBuffer({
+			label: 'gaussian indices',
+
+			size: this.#gaussians.count() * SIZEOF_UINT32,
+			usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
+		});
+
+		device.queue.writeBuffer(this.#gaussianIndexBuf, 0, this.#gaussianIndices.getBuffer());
 	}
 
 
@@ -535,25 +612,6 @@ export class SplatPlayer extends HTMLElement
             },
         );
 
-        console.time("calculate importance");
-        let sizeList = new Float32Array(vertexCount);
-        let sizeIndex = new Uint32Array(vertexCount);
-        for (row = 0; row < vertexCount; row++) {
-            sizeIndex[row] = row;
-            if (!types["scale_0"]) continue;
-            const size =
-                Math.exp(attrs.scale_0) *
-                Math.exp(attrs.scale_1) *
-                Math.exp(attrs.scale_2);
-            const opacity = 1 / (1 + Math.exp(-attrs.opacity));
-            sizeList[row] = size * opacity;
-        }
-        console.timeEnd("calculate importance");
-
-        console.time("sort");
-        sizeIndex.sort((b, a) => sizeList[a] - sizeList[b]);
-        console.timeEnd("sort");
-
         // 6*4 + 4 + 4 = 8*4
         // XYZ - Position (Float32)
         // XYZ - Scale (Float32)
@@ -565,7 +623,7 @@ export class SplatPlayer extends HTMLElement
 
         console.time("build buffer");
         for (let j = 0; j < vertexCount; j++) {
-            row = sizeIndex[j];
+            row = j;
 
             const position = new Float32Array(3);
             const scales = new Float32Array(3);
@@ -641,13 +699,19 @@ export class SplatPlayer extends HTMLElement
                 M[1] * M[2] + M[4] * M[5] + M[7] * M[8],
                 M[2] * M[2] + M[5] * M[5] + M[8] * M[8],
             ];
+
+			if(j == 0)
+			{
+				console.log('JS SIGMA:');
+				console.log(sigma);
+			}
 			// const cov = [
 			// 	sigma[0] * 4, sigma[1] * 4, sigma[2] * 4,
 			// 	sigma[1] * 4, sigma[3] * 4, sigma[4] * 4,
 			// 	sigma[2] * 4, sigma[4] * 4, sigma[5] * 4
 			// ];
 
-			result.push(this.#packGaussian(sigma, position, new Float32Array([rgba[0] / 255.0, rgba[1] / 255.0, rgba[2] / 255.0, rgba[3] / 255.0])))
+			result.push(this.#packGaussian(sigma, position, new Float32Array([rgba[0] / 255.0, rgba[1] / 255.0, rgba[2] / 255.0, rgba[3] / 255.0]), j == 0))
         }
         console.timeEnd("build buffer");
         return result;

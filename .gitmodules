@@ -1,0 +1,3 @@
+[submodule "src/wasm/external/QuickMathHPP"]
+	path = src/wasm/external/QuickMathHPP
+	url = git@github.com:frozein/QuickMathHPP.git

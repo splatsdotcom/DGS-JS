@@ -1,4 +1,10 @@
+# binary/dep directories
 node_modules/
+src/wasm/build/
+src/wasm/mgs.js
 
-# way too large
+# editor configs
+.vscode/
+
+# assets for testing
 *.ply
