@@ -1,0 +1,83 @@
+/* gaussian_rasterize.wgsl
+ *
+ * contains vertex and fragment shaders for rendering a single gaussian
+ */
+
+//-------------------------//
+
+struct Params
+{
+	view: mat4x4f,
+	proj: mat4x4f,
+
+	focalLengths: vec2f,
+	viewPort: vec2f
+};
+
+struct RenderedGaussian
+{
+	//TODO: pack
+
+	minor: vec2f,
+	major: vec2f,
+	color: vec4f,
+
+	center: vec2f
+};
+
+struct RenderedGaussians
+{
+	indirectIndexCount: u32,
+	numGaussians: u32, //or indirectInstanceCount
+	indirectFirstIndex: u32,
+	indirectBaseVertex: u32,
+	indirectFirstInstance: u32,
+
+	gaussians: array<RenderedGaussian>
+};
+
+struct VertexOutput 
+{
+	@builtin(position) pos : vec4f,
+
+	@location(0) localPos: vec2f,
+	@location(1) color: vec4f
+};
+
+//-------------------------//
+
+@binding(0) @group(0) var<uniform> u_params: Params;
+@binding(1) @group(0) var<storage, read> u_gaussians: RenderedGaussians;
+
+//-------------------------//
+
+@vertex
+fn vs(@location(0) quadPos: vec2<f32>, @location(1) idx: u32) -> VertexOutput 
+{
+    let g = u_gaussians.gaussians[idx];
+	var out: VertexOutput;
+
+    out.localPos = quadPos;
+
+	out.pos = vec4f(
+		g.center + (quadPos.x * g.major + quadPos.y * g.minor) / u_params.viewPort,
+		0.0, 1.0
+	);
+
+	out.color = g.color;
+
+	return out;
+}
+
+@fragment
+fn fs(in: VertexOutput) -> @location(0) vec4f
+{
+	let a = -dot(in.localPos, in.localPos);
+	if(a < -4.0)
+	{
+		discard;
+	}
+
+	let b = exp(a) * in.color.a;
+	return vec4f(in.color.rgb * b, b);
+}

@@ -8,31 +8,24 @@ const CANVAS_RESOLUTION_SCALE = 2;
 const SIZEOF_FLOAT32 = Float32Array.BYTES_PER_ELEMENT;
 const SIZEOF_UINT32  = Uint32Array.BYTES_PER_ELEMENT;
 
-const RENDERER_PROFILING = true;
+const GAUSSIAN_PREPROCESS_WORKGROUP_SIZE = 64;
+const RENDERER_NUM_TIMESTAMP_QUERIES = 6;
 
+//TEMP
 const PLY_PATH = "output.ply";
-
-const SORT_DISTANCE_CUTOFF = 0.1;
 const CAMERA_SPEED = 0.1;
 
 //-------------------------//
 
-import { mat3, mat4, vec3, vec4 } from 'gl-matrix';
 import MGSModule from './wasm/mgs.js'
-import shaderCode from './shaders/gaussian.wgsl?raw';
-
-//-------------------------//
-
-if(!navigator.gpu) 
-	throw new Error("WebGPU isn not supported!");
-
-const adapter = await navigator.gpu.requestAdapter();
-const device = await adapter?.requestDevice(RENDERER_PROFILING ? { requiredFeatures: ['timestamp-query'] } : null);
-
-if(!device)
-	throw new Error("Failed to initialize GPUDevice");
-
 const MGS = await MGSModule();
+
+import { mat4, vec3 } from 'gl-matrix';
+import { GPU_PROFILING, device } from './renderer/context.js';
+import RadixSortKernel from './renderer/radix_sort_kernel.js';
+
+import GAUSSIAN_PREPROCESS_SHADER_SRC from './renderer/shaders/gaussian_preprocess.wgsl?raw';
+import GAUSSIAN_RASTERIZE_SHADER_SRC  from './renderer/shaders/gaussian_rasterize.wgsl?raw';
 
 //-------------------------//
 
@@ -47,7 +40,6 @@ export class SplatPlayer extends HTMLElement
 		this.#canvas.style.height = '100%';
 		this.#canvas.style.display = 'block';
 		this.attachShadow({ mode: 'open' }).appendChild(this.#canvas);
-
 	}
 
 	async connectedCallback() 
@@ -65,11 +57,12 @@ export class SplatPlayer extends HTMLElement
 		//create resources:
 		//---------------
 		this.#context = this.#createContext();
-		this.#gaussianPipeline = this.#createGaussianPipeline();
+		this.#preprocessPipeline = this.#createPreprocessPipeline();
+		this.#rasterizePipeline = this.#createRasterizePipeline();
 		this.#geomBufs = this.#createGeometryBuffers();
 		this.#paramsBuf = this.#createParamsBuffer();
 
-		if(RENDERER_PROFILING)
+		if(GPU_PROFILING)
 			this.#profiler = this.#createProfiler();
 
 		//input handlers:
@@ -106,15 +99,13 @@ export class SplatPlayer extends HTMLElement
 		const loadStartTime = performance.now();
 
 		this.#gaussians = MGS.loadPlyPacked(plyBuf)
-		this.#gaussianIndices = this.#gaussians.sortedIndices(this.#camPos[0], this.#camPos[1], this.#camPos[2]);
 
 		const loadEndTime = performance.now();
 		console.log(`PLY loading took ${loadEndTime - loadStartTime}ms`);
 
 		const uploadStartTime = performance.now();
 
-		this.#uploadGaussians();
-		this.#uploadGaussianIndices();
+		this.#gaussianBufs = this.#createGaussianBufs(this.#gaussians);
 
 		const uploadEndTime = performance.now();
 		console.log(`GPU upload took ${uploadEndTime - uploadStartTime}ms`);
@@ -130,21 +121,18 @@ export class SplatPlayer extends HTMLElement
 
 	#canvas = null;
 	#context = null;
-	#gaussianPipeline = null;
-	#geomBufs = null;
-	#paramsBuf = null;
+	#preprocessPipeline = null;
+	#rasterizePipeline = null;
 	#profiler = null;
 
 	#gaussians = null;
-	#gaussianIndices = null;
-
-	#gaussianBuf = null;
-	#gaussianIndexBuf = null;
+	#gaussianBufs = null;
+	#geomBufs = null;
+	#paramsBuf = null;
 
 	#lastRenderTime = null;
 
 	#camPos     = vec3.zero(vec3.create());
-	#lastCamPos = vec3.copy(vec3.create(), this.#camPos);
 	#camYaw   = 0.0;
 	#camPitch = 0.0;
 	#keys     = {};
@@ -165,12 +153,34 @@ export class SplatPlayer extends HTMLElement
 		return context;
 	}
 
-	#createGaussianPipeline() 
+	#createPreprocessPipeline()
 	{
 		const shaderModule = device.createShaderModule({
-			label: 'gaussian',
+			label: 'gaussian preprocess',
 
-			code: shaderCode 
+			code: GAUSSIAN_PREPROCESS_SHADER_SRC,
+		});
+
+		return device.createComputePipeline({
+			label: 'gaussian preprocess',
+
+			layout: 'auto',
+			compute: {
+				module: shaderModule,
+				entryPoint: 'preprocess',
+				constants: {
+					'WORKGROUP_SIZE': GAUSSIAN_PREPROCESS_WORKGROUP_SIZE,
+				}
+			}
+		});
+	}
+
+	#createRasterizePipeline() 
+	{
+		const shaderModule = device.createShaderModule({
+			label: 'gaussian rasterize',
+
+			code: GAUSSIAN_RASTERIZE_SHADER_SRC 
 		});
 
 		const pipeline = device.createRenderPipeline({
@@ -179,7 +189,7 @@ export class SplatPlayer extends HTMLElement
 			layout: 'auto',
 			vertex: {
 				module: shaderModule,
-				entryPoint: 'vs_main',
+				entryPoint: 'vs',
 				buffers: [
 					{
 						stepMode: 'vertex',
@@ -191,15 +201,15 @@ export class SplatPlayer extends HTMLElement
 					{
 						stepMode: 'instance',
 						arrayStride: SIZEOF_UINT32,
-						attributes: [{
-							shaderLocation: 1, offset: 0, format: 'uint32' //gaussian index
+						attributes: [{ 
+							shaderLocation: 1, offset: 0, format: 'uint32' //index
 						}]
 					}
 				]
 			},
 			fragment: {
 				module: shaderModule,
-				entryPoint: 'fs_main',
+				entryPoint: 'fs',
 				targets: [{ 
 					format: navigator.gpu.getPreferredCanvasFormat(),
 					blend: {
@@ -215,6 +225,23 @@ export class SplatPlayer extends HTMLElement
 		});
 
 		return pipeline;
+	}
+
+	#createProfiler()
+	{
+		const querySet = device.createQuerySet({
+			type: 'timestamp',
+			count: RENDERER_NUM_TIMESTAMP_QUERIES
+		});
+
+		return {
+			querySet: querySet,
+			accumFrames: 0,
+			accumTime: 0,
+			accumRasterTime: 0,
+			accumSortTime: 0,
+			accumPreprocessTime: 0
+		};
 	}
 
 	#createGeometryBuffers() 
@@ -273,19 +300,46 @@ export class SplatPlayer extends HTMLElement
 		});
 	}
 
-	#createProfiler()
+	#createGaussianBufs(gaussians)
 	{
-		const querySet = device.createQuerySet({
-			type: 'timestamp',
-			count: 4
+		const gaussianSize = 8 * SIZEOF_FLOAT32;
+		const renderedGaussianSize = 12 * SIZEOF_FLOAT32;
+		const renderedGaussianHeaderSize = 8 * SIZEOF_UINT32;
+
+		const gaussianBuf = device.createBuffer({
+			label: 'gaussians',
+
+			size: this.#gaussians.count() * gaussianSize,
+			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+		});
+		device.queue.writeBuffer(gaussianBuf, 0, gaussians.getBuffer());
+
+		const renderedGaussianBuf = device.createBuffer({
+			label: 'rendered gaussians',
+
+			size: renderedGaussianHeaderSize + gaussians.count() * renderedGaussianSize,
+			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.INDIRECT
+		});
+
+		const gaussianDepthBuf = device.createBuffer({
+			label: 'gaussian depths',
+
+			size: gaussians.count() * SIZEOF_UINT32,
+			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+		});
+
+		const gaussianIndexBuf = device.createBuffer({
+			label: 'gaussian indices',
+
+			size: gaussians.count() * SIZEOF_UINT32,
+			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.VERTEX
 		});
 
 		return {
-			querySet: querySet,
-			accumFrames: 0,
-			accumTime: 0.0,
-			accumRasterTime: 0,
-			accumPreprocessTime: 0
+			gaussians: gaussianBuf,
+			rendered: renderedGaussianBuf,
+			depths: gaussianDepthBuf,
+			indices: gaussianIndexBuf
 		};
 	}
 
@@ -311,18 +365,33 @@ export class SplatPlayer extends HTMLElement
 
 	#createBindGroups()
 	{
-		const gaussianGroup = device.createBindGroup({
-			label: 'gaussian',
+		const preprocessGroup = device.createBindGroup({
+			label: 'gaussian preprocess',
 
-			layout: this.#gaussianPipeline.getBindGroupLayout(0),
+			layout: this.#preprocessPipeline.getBindGroupLayout(0),
 			entries: [
 				{ binding: 0, resource: { buffer: this.#paramsBuf } },
-				{ binding: 1, resource: { buffer: this.#gaussianBuf } } //TEMP!!
+				{ binding: 1, resource: { buffer: this.#gaussianBufs.gaussians } },
+
+				{ binding: 2, resource: { buffer: this.#gaussianBufs.rendered } },
+				{ binding: 3, resource: { buffer: this.#gaussianBufs.depths } },
+				{ binding: 4, resource: { buffer: this.#gaussianBufs.indices } }
+			]
+		});
+
+		const rasterizeGroup = device.createBindGroup({
+			label: 'gaussian rasterize',
+
+			layout: this.#rasterizePipeline.getBindGroupLayout(0),
+			entries: [
+				{ binding: 0, resource: { buffer: this.#paramsBuf } },
+				{ binding: 1, resource: { buffer: this.#gaussianBufs.rendered } }
 			]
 		});
 
 		return {
-			gaussian: gaussianGroup
+			preprocess: preprocessGroup,
+			rasterize: rasterizeGroup
 		};
 	}
 
@@ -360,27 +429,6 @@ export class SplatPlayer extends HTMLElement
 		this.#lastRenderTime = timestamp;
 		this.#updateCamera(dt / 1000.0);
 
-		//sort gaussians:
-		//---------------
-
-		//TEMP!!! figure out a better way to do this
-
-		if(vec3.distance(this.#camPos, this.#lastCamPos) > SORT_DISTANCE_CUTOFF)
-		{
-			this.#gaussianIndices.delete();
-
-			const start = performance.now();
-
-			this.#gaussianIndices = this.#gaussians.sortedIndices(this.#camPos[0], this.#camPos[1], this.#camPos[2]);
-			this.#uploadGaussianIndices();
-
-			const end = performance.now();
-
-			console.log(`gaussian sorting took ${end - start}ms`);
-
-			vec3.copy(this.#lastCamPos, this.#camPos);
-		}
-
 		//create cam/proj matrices:
 		//---------------
 
@@ -393,7 +441,7 @@ export class SplatPlayer extends HTMLElement
 
 		const view = mat4.create();
 		this.lastView = view;
-		mat4.lookAt(view, this.#camPos, target, [0, 1, 0]);
+		mat4.lookAt(view, this.#camPos, target, [0, -1, 0]);
 
 		const proj = mat4.create();
 		const fovY = Math.PI / 4;
@@ -416,15 +464,15 @@ export class SplatPlayer extends HTMLElement
 		//-----------------
 		let queryBuffer = null;
 		let queryReadbackBuffer = null;
-		if(RENDERER_PROFILING)
+		if(GPU_PROFILING)
 		{
 			queryBuffer = device.createBuffer({
-				size: 4 * 8,
+				size: RENDERER_NUM_TIMESTAMP_QUERIES * 8,
 				usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
 			});
 
 			queryReadbackBuffer = device.createBuffer({
-				size: 4 * 8,
+				size: RENDERER_NUM_TIMESTAMP_QUERIES * 8,
 				usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
 			});
 		}
@@ -433,9 +481,54 @@ export class SplatPlayer extends HTMLElement
 		//---------------
 		const encoder = device.createCommandEncoder();
 
+		//preprocess:
+		//---------------
+		const renderedGaussianBufClearValue = new Uint32Array([
+			6, //index count
+			0, //instance count (incremented in shader)
+			0, //first index
+			0, //base vertex
+			0  //first instance
+		]);
+		device.queue.writeBuffer(this.#gaussianBufs.rendered, 0, renderedGaussianBufClearValue);
+
+		const gaussianDepthClearValue = new Uint32Array(this.#gaussians.count()).fill(0xFFFFFFFF);
+		device.queue.writeBuffer(this.#gaussianBufs.depths, 0, gaussianDepthClearValue); //TODO: please dont do this
+
+		const preprocessPass = encoder.beginComputePass({
+			timestampWrites: GPU_PROFILING ? {
+				querySet: this.#profiler.querySet,
+				beginningOfPassWriteIndex: 0,
+				endOfPassWriteIndex: 1
+			} : undefined
+		});
+
+		preprocessPass.setPipeline(this.#preprocessPipeline);
+		preprocessPass.setBindGroup(0, bindGroups.preprocess);
+
+		preprocessPass.dispatchWorkgroups(Math.ceil(this.#gaussians.count() / GAUSSIAN_PREPROCESS_WORKGROUP_SIZE));
+
+		preprocessPass.end();
+
+		//sort by distance:
+		//---------------
+		const sortPass = encoder.beginComputePass({
+			timestampWrites: GPU_PROFILING ? {
+				querySet: this.#profiler.querySet,
+				beginningOfPassWriteIndex: 2,
+				endOfPassWriteIndex: 3
+			} : undefined
+		});
+
+		//TODO: actually read number of rendered gaussians!!!!
+		const sort = new RadixSortKernel(this.#gaussians.count(), this.#gaussianBufs.depths, this.#gaussianBufs.indices, 32);
+		sort.dispatch(sortPass);
+
+		sortPass.end();
+
 		//rasterize:
 		//---------------
-		const pass = encoder.beginRenderPass({
+		const rasterPass = encoder.beginRenderPass({
 			label: 'main',
 
 			colorAttachments: [{
@@ -445,36 +538,36 @@ export class SplatPlayer extends HTMLElement
 				storeOp: 'store'
 			}],
 
-			timestampWrites: RENDERER_PROFILING ? {
+			timestampWrites: GPU_PROFILING ? {
 				querySet: this.#profiler.querySet,
-				beginningOfPassWriteIndex: 2,
-				endOfPassWriteIndex: 3
+				beginningOfPassWriteIndex: 4,
+				endOfPassWriteIndex: 5
 			} : undefined
 		});
 
-		pass.setPipeline(this.#gaussianPipeline);
-		pass.setVertexBuffer(0, this.#geomBufs.vertex);
-		pass.setVertexBuffer(1, this.#gaussianIndexBuf);
-		pass.setIndexBuffer(this.#geomBufs.index, 'uint16');
-		pass.setBindGroup(0, bindGroups.gaussian);
+		rasterPass.setPipeline(this.#rasterizePipeline);
+		rasterPass.setVertexBuffer(0, this.#geomBufs.vertex);
+		rasterPass.setVertexBuffer(1, this.#gaussianBufs.indices);
+		rasterPass.setIndexBuffer(this.#geomBufs.index, 'uint16');
+		rasterPass.setBindGroup(0, bindGroups.rasterize);
 
-		pass.drawIndexed(6, this.#gaussians.count());
+		rasterPass.drawIndexedIndirect(this.#gaussianBufs.rendered, 0);
 
-		pass.end();
+		rasterPass.end();
 
 		//submit command buffer:
 		//---------------
-		if(RENDERER_PROFILING)
+		if(GPU_PROFILING)
 		{
-			encoder.resolveQuerySet(this.#profiler.querySet, 0, 4, queryBuffer, 0);
-			encoder.copyBufferToBuffer(queryBuffer, 0, queryReadbackBuffer, 0, 4 * 8);
+			encoder.resolveQuerySet(this.#profiler.querySet, 0, RENDERER_NUM_TIMESTAMP_QUERIES, queryBuffer, 0);
+			encoder.copyBufferToBuffer(queryBuffer, 0, queryReadbackBuffer, 0, RENDERER_NUM_TIMESTAMP_QUERIES * 8);
 		}
 
 		device.queue.submit([encoder.finish()]);
 
 		//read profiling data:
 		//-----------------
-		if(RENDERER_PROFILING)
+		if(GPU_PROFILING)
 		{
 			queryReadbackBuffer.mapAsync(GPUMapMode.READ).then(() => {
 				const timestampsBuf = queryReadbackBuffer.getMappedRange();
@@ -482,20 +575,23 @@ export class SplatPlayer extends HTMLElement
 
 				this.#profiler.accumFrames++;
 				this.#profiler.accumTime += dt;
-				this.#profiler.accumPreprocessTime += 0; //TODO
-				this.#profiler.accumRasterTime     += Number(timestamps[3] - timestamps[2]);
+				this.#profiler.accumPreprocessTime += Number(timestamps[1] - timestamps[0]);
+				this.#profiler.accumSortTime       += Number(timestamps[3] - timestamps[2]);
+				this.#profiler.accumRasterTime     += Number(timestamps[5] - timestamps[4]);
 
 				queryReadbackBuffer.unmap();
 
 				if(this.#profiler.accumTime >= 1000.0)
 				{
 					const avgPreprocessTime = (this.#profiler.accumPreprocessTime / 1000000) / this.#profiler.accumFrames;
+					const avgSortTime       = (this.#profiler.accumSortTime       / 1000000) / this.#profiler.accumFrames;
 					const avgRasterTime     = (this.#profiler.accumRasterTime     / 1000000) / this.#profiler.accumFrames;
-					const avgTime = avgPreprocessTime + avgRasterTime;
+					const avgTime = avgPreprocessTime + avgSortTime + avgRasterTime;
 
 					const lines = [
 						`GPU time: ${avgTime.toPrecision(3)}ms/frame`,
 						`  - ${avgPreprocessTime.toPrecision(3)}ms preprocessing`,
+						`  - ${avgSortTime.toPrecision(3)}ms sorting`,
 						`  - ${avgRasterTime.toPrecision(3)}ms rasterizing`,
 					];
 					console.log(lines.join('\n'));
@@ -503,6 +599,7 @@ export class SplatPlayer extends HTMLElement
 					this.#profiler.accumFrames = 0;
 					this.#profiler.accumTime = 0.0;
 					this.#profiler.accumPreprocessTime = 0;
+					this.#profiler.accumSortTime = 0;
 					this.#profiler.accumRasterTime = 0;
 				}
 			});
@@ -513,31 +610,6 @@ export class SplatPlayer extends HTMLElement
 		requestAnimationFrame((t) => {
 			this.#render(t)
 		});
-	}
-
-	#uploadGaussians()
-	{
-		const gaussianSize = 8 * SIZEOF_FLOAT32;
-		this.#gaussianBuf = device.createBuffer({
-			label: 'gaussians',
-
-			size: this.#gaussians.count() * gaussianSize,
-			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
-		});
-
-		device.queue.writeBuffer(this.#gaussianBuf, 0, this.#gaussians.getBuffer());
-	}
-
-	#uploadGaussianIndices()
-	{
-		this.#gaussianIndexBuf = device.createBuffer({
-			label: 'gaussian indices',
-
-			size: this.#gaussians.count() * SIZEOF_UINT32,
-			usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
-		});
-
-		device.queue.writeBuffer(this.#gaussianIndexBuf, 0, this.#gaussianIndices.getBuffer());
 	}
 }
 
