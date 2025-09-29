@@ -21,20 +21,6 @@ EMSCRIPTEN_BINDINGS(libmgs_js)
 			return indices;
 		}))
 
-		.function("sortIndicesAsync", emscripten::optional_override([](mgs::GaussianGroup& self, float camX, float camY, float camZ)
-		{
-			self.sort_indices_async(vec3(camX, camY, camZ));
-		}))
-
-		.function("sortIndicesAsyncRetrieve", emscripten::optional_override([](mgs::GaussianGroup& self) -> std::shared_ptr<std::vector<uint32_t>>
-		{
-			auto indices = self.sort_indices_async_retrieve();
-			if(!indices.has_value())
-				return nullptr;
-
-			return std::make_shared<std::vector<uint32_t>>(std::move(indices.value()));
-		}))
-
 		.function("getBuffer", emscripten::optional_override([](const mgs::GaussianGroup& self)
 		{
 			return emscripten::val(emscripten::typed_memory_view(

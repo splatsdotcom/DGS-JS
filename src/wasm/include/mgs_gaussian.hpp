@@ -74,18 +74,8 @@ public:
 
 	std::vector<uint32_t> sorted_indices(const vec3& camPos);
 
-	void sort_indices_async(const vec3& camPos);
-	std::optional<std::vector<uint32_t>> sort_indices_async_retrieve();
-
 private:
 	std::vector<GaussianPacked> m_gaussians;
-
-	//async stuff TODO refactor this
-    std::vector<uint32_t> m_sortedIndices;
-    std::atomic<bool> m_sortInProgress{false};
-    std::atomic<bool> m_sortDone{false};
-    mutable std::mutex m_sortMutex;
-    std::thread m_thread;
 };
 
 }; //namespace mgs

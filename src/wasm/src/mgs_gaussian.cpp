@@ -123,37 +123,6 @@ std::vector<uint32_t> GaussianGroup::sorted_indices(const vec3& camPos)
 	return sortedIndices;
 }
 
-//TODO: refactor this mess
-void GaussianGroup::sort_indices_async(const vec3& camPos)
-{
-	std::lock_guard<std::mutex> lock(m_sortMutex);
-	if(m_sortInProgress) 
-		return;
-
-	m_sortInProgress = true;
-	m_thread = std::thread([this, camPos]()
-	{
-		std::vector<uint32_t> indices = sorted_indices(camPos);
-		{
-			std::lock_guard<std::mutex> lock(this->m_sortMutex);
-			this->m_sortedIndices = std::move(indices);
-			this->m_sortDone = true;
-			this->m_sortInProgress = false;
-		}
-	});
-	m_thread.detach();
-}
-
-std::optional<std::vector<uint32_t>> GaussianGroup::sort_indices_async_retrieve()
-{
-	if(!m_sortDone.load())
-		return std::nullopt;
-
-	std::lock_guard<std::mutex> lock(m_sortMutex);
-	m_sortDone = false;
-	return std::vector<uint32_t>(std::move(m_sortedIndices));
-}
-
 //-------------------------------------------//
 
 static inline float float32_from_bits(uint32_t bits)

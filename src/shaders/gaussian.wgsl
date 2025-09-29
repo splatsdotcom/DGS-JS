@@ -9,6 +9,7 @@ struct Params
 {
 	view: mat4x4f,
 	proj: mat4x4f,
+
 	focalLengths: vec2f,
 	viewPort: vec2f
 };
@@ -115,6 +116,7 @@ fn vs_main(@location(0) quadPos: vec2<f32>, @location(1) id: u32) -> VertexOutpu
 		centerPos + (quadPos.x * major + quadPos.y * minor) / u_params.viewPort,
 		0.0, 1.0
 	);
+	out.pos.y *= -1.0; //flip y coordinate
 
 	let color = unpack4x8unorm(g.color);
 	out.color = clamp(clipPos.z / clipPos.w + 1.0, 0.0, 1.0) * color;

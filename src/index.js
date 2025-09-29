@@ -8,6 +8,11 @@ const CANVAS_RESOLUTION_SCALE = 2;
 const SIZEOF_FLOAT32 = Float32Array.BYTES_PER_ELEMENT;
 const SIZEOF_UINT32  = Uint32Array.BYTES_PER_ELEMENT;
 
+const PLY_PATH = "output.ply";
+
+const SORT_DISTANCE_CUTOFF = 0.1;
+const CAMERA_SPEED = 0.2;
+
 //-------------------------//
 
 import { mat3, mat4, vec3, vec4 } from 'gl-matrix';
@@ -82,14 +87,14 @@ export class SplatPlayer extends HTMLElement
 
 				const sensitivity = 0.0025;
 				this.#camYaw   -= dx * sensitivity;
-				this.#camPitch -= dy * sensitivity;
+				this.#camPitch += dy * sensitivity;
 				this.#camPitch = Math.max(-Math.PI/2+0.01, Math.min(Math.PI/2-0.01, this.#camPitch));
 			}
 		});
 
 		//initialize gaussians:
 		//---------------
-		const fetchResponse = await fetch('point_cloud.ply'); //TODO: dont hardcode this!
+		const fetchResponse = await fetch(PLY_PATH);
 		if(!fetchResponse.ok)
 			throw new Error("Failed to fetch test .ply");
 
@@ -134,11 +139,10 @@ export class SplatPlayer extends HTMLElement
 
 	#lastRenderTime = null;
 
-	//TEMP:
-	#camPos   = vec3.fromValues(3, 3, 3);
+	#camPos     = vec3.zero(vec3.create());
 	#lastCamPos = vec3.copy(vec3.create(), this.#camPos);
-	#camYaw   = -3 * Math.PI / 4;
-	#camPitch = -Math.PI / 4;
+	#camYaw   = 0.0;
+	#camPitch = 0.0;
 	#keys     = {};
 	#isDragging = false;
 	#lastMouse = [0, 0];
@@ -307,7 +311,7 @@ export class SplatPlayer extends HTMLElement
 
 	#updateCamera(dt)
 	{
-		const speed = 2.5 * dt;
+		const speed = dt * CAMERA_SPEED;
 		const forward = vec3.fromValues(
 			Math.cos(this.#camPitch) * Math.sin(this.#camYaw),
 			Math.sin(this.#camPitch),
@@ -323,8 +327,8 @@ export class SplatPlayer extends HTMLElement
 		if(this.#keys["KeyS"]) vec3.scaleAndAdd(this.#camPos, this.#camPos, forward, -speed);
 		if(this.#keys["KeyA"]) vec3.scaleAndAdd(this.#camPos, this.#camPos, right, -speed);
 		if(this.#keys["KeyD"]) vec3.scaleAndAdd(this.#camPos, this.#camPos, right, speed);
-		if(this.#keys["Space"])     this.#camPos[1] += speed;
-		if(this.#keys["ShiftLeft"]) this.#camPos[1] -= speed;
+		if(this.#keys["Space"])     this.#camPos[1] -= speed;
+		if(this.#keys["ShiftLeft"]) this.#camPos[1] += speed;
 	}
 
 
@@ -344,30 +348,20 @@ export class SplatPlayer extends HTMLElement
 
 		//TEMP!!! figure out a better way to do this
 
-		if(vec3.distance(this.#camPos, this.#lastCamPos) > 1.0 && !this.#sorting)
+		if(vec3.distance(this.#camPos, this.#lastCamPos) > SORT_DISTANCE_CUTOFF)
 		{
-			this.#gaussians.sortIndicesAsync(this.#camPos[0], this.#camPos[1], this.#camPos[2]);
+			this.#gaussianIndices.delete();
 
-			this.#sorting = true;
-			this.#startSortingTime = performance.now();
+			const start = performance.now();
+
+			this.#gaussianIndices = this.#gaussians.sortedIndices(this.#camPos[0], this.#camPos[1], this.#camPos[2]);
+			this.#uploadGaussianIndices();
+
+			const end = performance.now();
+
+			console.log(`gaussian sorting took ${end - start}ms`);
 
 			vec3.copy(this.#lastCamPos, this.#camPos);
-		}
-
-		if(this.#sorting)
-		{
-			let indices = this.#gaussians.sortIndicesAsyncRetrieve();
-
-			if(indices)
-			{
-				this.#sorting = false;
-
-				console.log(`gaussian sorting took ${performance.now() - this.#startSortingTime}ms`);
-
-				this.#gaussianIndices.delete();
-				this.#gaussianIndices = indices;
-				this.#uploadGaussianIndices();
-			}
 		}
 
 		//create cam/proj matrices:
@@ -382,12 +376,12 @@ export class SplatPlayer extends HTMLElement
 
 		const view = mat4.create();
 		this.lastView = view;
-		mat4.lookAt(view, this.#camPos, target, [0,1,0]);
+		mat4.lookAt(view, this.#camPos, target, [0, 1, 0]);
 
 		const proj = mat4.create();
 		const fovY = Math.PI / 4;
 		const aspect = this.#canvas.width / this.#canvas.height;
-		mat4.perspective(proj, fovY, aspect, 0.1, 100);
+		mat4.perspective(proj, fovY, aspect, 0.01, 100);
 
 		const f = 1 / Math.tan(fovY / 2);
 		const fx = f / aspect * (this.#canvas.width / 2);
