@@ -8,10 +8,12 @@ const CANVAS_RESOLUTION_SCALE = 2;
 const SIZEOF_FLOAT32 = Float32Array.BYTES_PER_ELEMENT;
 const SIZEOF_UINT32  = Uint32Array.BYTES_PER_ELEMENT;
 
+const RENDERER_PROFILING = true;
+
 const PLY_PATH = "output.ply";
 
 const SORT_DISTANCE_CUTOFF = 0.1;
-const CAMERA_SPEED = 0.2;
+const CAMERA_SPEED = 0.1;
 
 //-------------------------//
 
@@ -25,7 +27,7 @@ if(!navigator.gpu)
 	throw new Error("WebGPU isn not supported!");
 
 const adapter = await navigator.gpu.requestAdapter();
-const device = await adapter?.requestDevice();
+const device = await adapter?.requestDevice(RENDERER_PROFILING ? { requiredFeatures: ['timestamp-query'] } : null);
 
 if(!device)
 	throw new Error("Failed to initialize GPUDevice");
@@ -67,7 +69,8 @@ export class SplatPlayer extends HTMLElement
 		this.#geomBufs = this.#createGeometryBuffers();
 		this.#paramsBuf = this.#createParamsBuffer();
 
-		// this.#gaussians = this.#createGaussians(); //TEMP!
+		if(RENDERER_PROFILING)
+			this.#profiler = this.#createProfiler();
 
 		//input handlers:
 		//---------------
@@ -86,7 +89,7 @@ export class SplatPlayer extends HTMLElement
 				this.#lastMouse = [e.clientX, e.clientY];
 
 				const sensitivity = 0.0025;
-				this.#camYaw   -= dx * sensitivity;
+				this.#camYaw   += dx * sensitivity;
 				this.#camPitch += dy * sensitivity;
 				this.#camPitch = Math.max(-Math.PI/2+0.01, Math.min(Math.PI/2-0.01, this.#camPitch));
 			}
@@ -130,6 +133,7 @@ export class SplatPlayer extends HTMLElement
 	#gaussianPipeline = null;
 	#geomBufs = null;
 	#paramsBuf = null;
+	#profiler = null;
 
 	#gaussians = null;
 	#gaussianIndices = null;
@@ -146,9 +150,6 @@ export class SplatPlayer extends HTMLElement
 	#keys     = {};
 	#isDragging = false;
 	#lastMouse = [0, 0];
-
-	#sorting = false;
-	#startSortingTime = 0.0;
 
 	//-------------------------//
 
@@ -272,6 +273,22 @@ export class SplatPlayer extends HTMLElement
 		});
 	}
 
+	#createProfiler()
+	{
+		const querySet = device.createQuerySet({
+			type: 'timestamp',
+			count: 4
+		});
+
+		return {
+			querySet: querySet,
+			accumFrames: 0,
+			accumTime: 0.0,
+			accumRasterTime: 0,
+			accumPreprocessTime: 0
+		};
+	}
+
 	#updateParamsBuffer(view, proj, focalLengths, viewPort)
 	{
 		const data = new Float32Array(this.#paramsBuf.size / SIZEOF_FLOAT32);
@@ -325,8 +342,8 @@ export class SplatPlayer extends HTMLElement
 
 		if(this.#keys["KeyW"]) vec3.scaleAndAdd(this.#camPos, this.#camPos, forward, speed);
 		if(this.#keys["KeyS"]) vec3.scaleAndAdd(this.#camPos, this.#camPos, forward, -speed);
-		if(this.#keys["KeyA"]) vec3.scaleAndAdd(this.#camPos, this.#camPos, right, -speed);
-		if(this.#keys["KeyD"]) vec3.scaleAndAdd(this.#camPos, this.#camPos, right, speed);
+		if(this.#keys["KeyA"]) vec3.scaleAndAdd(this.#camPos, this.#camPos, right, speed);
+		if(this.#keys["KeyD"]) vec3.scaleAndAdd(this.#camPos, this.#camPos, right, -speed);
 		if(this.#keys["Space"])     this.#camPos[1] -= speed;
 		if(this.#keys["ShiftLeft"]) this.#camPos[1] += speed;
 	}
@@ -395,9 +412,29 @@ export class SplatPlayer extends HTMLElement
 		this.#updateParamsBuffer(view, proj, focalLengths, viewPort);
 		const bindGroups = this.#createBindGroups();
 
-		//render:
+		//create query buffers:
+		//-----------------
+		let queryBuffer = null;
+		let queryReadbackBuffer = null;
+		if(RENDERER_PROFILING)
+		{
+			queryBuffer = device.createBuffer({
+				size: 4 * 8,
+				usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
+			});
+
+			queryReadbackBuffer = device.createBuffer({
+				size: 4 * 8,
+				usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+			});
+		}
+
+		//create command encoder:
 		//---------------
 		const encoder = device.createCommandEncoder();
+
+		//rasterize:
+		//---------------
 		const pass = encoder.beginRenderPass({
 			label: 'main',
 
@@ -406,7 +443,13 @@ export class SplatPlayer extends HTMLElement
 				clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
 				loadOp: 'clear',
 				storeOp: 'store'
-			}]
+			}],
+
+			timestampWrites: RENDERER_PROFILING ? {
+				querySet: this.#profiler.querySet,
+				beginningOfPassWriteIndex: 2,
+				endOfPassWriteIndex: 3
+			} : undefined
 		});
 
 		pass.setPipeline(this.#gaussianPipeline);
@@ -418,114 +461,58 @@ export class SplatPlayer extends HTMLElement
 		pass.drawIndexed(6, this.#gaussians.count());
 
 		pass.end();
+
+		//submit command buffer:
+		//---------------
+		if(RENDERER_PROFILING)
+		{
+			encoder.resolveQuerySet(this.#profiler.querySet, 0, 4, queryBuffer, 0);
+			encoder.copyBufferToBuffer(queryBuffer, 0, queryReadbackBuffer, 0, 4 * 8);
+		}
+
 		device.queue.submit([encoder.finish()]);
+
+		//read profiling data:
+		//-----------------
+		if(RENDERER_PROFILING)
+		{
+			queryReadbackBuffer.mapAsync(GPUMapMode.READ).then(() => {
+				const timestampsBuf = queryReadbackBuffer.getMappedRange();
+				const timestamps = new BigUint64Array(timestampsBuf);
+
+				this.#profiler.accumFrames++;
+				this.#profiler.accumTime += dt;
+				this.#profiler.accumPreprocessTime += 0; //TODO
+				this.#profiler.accumRasterTime     += Number(timestamps[3] - timestamps[2]);
+
+				queryReadbackBuffer.unmap();
+
+				if(this.#profiler.accumTime >= 1000.0)
+				{
+					const avgPreprocessTime = (this.#profiler.accumPreprocessTime / 1000000) / this.#profiler.accumFrames;
+					const avgRasterTime     = (this.#profiler.accumRasterTime     / 1000000) / this.#profiler.accumFrames;
+					const avgTime = avgPreprocessTime + avgRasterTime;
+
+					const lines = [
+						`GPU time: ${avgTime.toPrecision(3)}ms/frame`,
+						`  - ${avgPreprocessTime.toPrecision(3)}ms preprocessing`,
+						`  - ${avgRasterTime.toPrecision(3)}ms rasterizing`,
+					];
+					console.log(lines.join('\n'));
+
+					this.#profiler.accumFrames = 0;
+					this.#profiler.accumTime = 0.0;
+					this.#profiler.accumPreprocessTime = 0;
+					this.#profiler.accumRasterTime = 0;
+				}
+			});
+		}
 
 		//loop:
 		//---------------
 		requestAnimationFrame((t) => {
 			this.#render(t)
 		});
-	}
-
-	#packGaussian(sigma, mean, color) 
-	{
-		let data = new ArrayBuffer(8 * 4);
-		let dataUint  = new Uint32Array (data);
-		let dataFloat = new Float32Array(data);
-
-		function float32ToFloat16(val) 
-		{
-			const floatView = new Float32Array(1);
-			const int32View = new Uint32Array(floatView.buffer);
-			floatView[0] = val;
-			const x = int32View[0];
-			let bits = (x >> 16) & 0x8000; // sign
-			let m = (x & 0x7fffff) >> 13;
-			let e = ((x >> 23) & 0xff) - 127 + 15;
-			if (e <= 0) { return bits; }
-			if (e >= 31) { return bits | 0x7c00 | m; }
-
-			return bits | (e << 10) | (m & 0x3ff);
-		}
-
-		function pack2x16half(f1, f2) 
-		{
-			return (float32ToFloat16(f2) << 16) | float32ToFloat16(f1);
-		}
-
-		dataUint.set([
-			pack2x16half(4 * sigma[0], 4 * sigma[1]),
-			pack2x16half(4 * sigma[2], 4 * sigma[3]),
-			pack2x16half(4 * sigma[4], 4 * sigma[5])
-		], 0); //covariance
-
-		const colorU32 = (
-			(color[3] * 255) << 24 |
-			(color[2] * 255) << 16 |
-			(color[1] * 255) << 8  |
-			(color[0] * 255)
-		) >>> 0;
-		dataUint.set(
-			[colorU32],
-			3
-		); //color
-
-		dataFloat.set(
-			mean, 
-			4
-		); //mean
-
-		return data;
-	}
-
-
-	// ------ TEMP -------
-
-	#createGaussians()
-	{
-		return [
-			this.#packGaussian(
-				mat3.identity(mat3.create()),
-				vec3.fromValues(0.75, 0.0, 0.0),
-				vec4.fromValues(1.0, 0.0, 0.0, 0.5)
-			),
-			this.#packGaussian(
-				mat3.identity(mat3.create()),
-				vec3.fromValues(-0.75, 0.0, 0.0),
-				vec4.fromValues(0.0, 0.0, 1.0, 0.5)
-			),
-			this.#packGaussian(
-				mat3.identity(mat3.create()),
-				vec3.fromValues(0.0, 0.0, 0.75),
-				vec4.fromValues(0.0, 1.0, 0.0, 0.5)
-			),
-			this.#packGaussian(
-				mat3.identity(mat3.create()),
-				vec3.fromValues(0.0, 0.0, -0.75),
-				vec4.fromValues(1.0, 1.0, 0.0, 0.5)
-			)
-		];
-	}
-
-	#sortGaussians(view, gaussians)
-	{
-		const camPos = vec4.transformMat4(vec4.create(), vec4.fromValues(0.0, 0.0, 0.0, 1.0), mat4.invert(mat4.create(), view));
-
-		let keys = [];
-		for(let i = 0; i < gaussians.length; i++)
-		{
-			let floats = new Float32Array(gaussians[i]);
-			let mean = vec3.fromValues(floats[4], floats[5], floats[6]);
-			let to = vec3.sub(vec3.create(), camPos, mean);
-
-			keys.push({
-				dist: vec3.squaredLength(to),
-				gaussian: gaussians[i]
-			});
-		}
-
-		keys.sort((a, b) => a.dist - b.dist);
-		return keys.map((k) => k.gaussian);
 	}
 
 	#uploadGaussians()
@@ -552,165 +539,6 @@ export class SplatPlayer extends HTMLElement
 
 		device.queue.writeBuffer(this.#gaussianIndexBuf, 0, this.#gaussianIndices.getBuffer());
 	}
-
-
-#processPlyBuffer(inputBuffer) {
-        const ubuf = new Uint8Array(inputBuffer);
-        // 10KB ought to be enough for a header...
-        const header = new TextDecoder().decode(ubuf.slice(0, 1024 * 10));
-        const header_end = "end_header\n";
-        const header_end_index = header.indexOf(header_end);
-        if (header_end_index < 0)
-            throw new Error("Unable to read .ply file header");
-        const vertexCount = parseInt(/element vertex (\d+)\n/.exec(header)[1]);
-        console.log("Vertex Count", vertexCount);
-        let row_offset = 0,
-            offsets = {},
-            types = {};
-        const TYPE_MAP = {
-            double: "getFloat64",
-            int: "getInt32",
-            uint: "getUint32",
-            float: "getFloat32",
-            short: "getInt16",
-            ushort: "getUint16",
-            uchar: "getUint8",
-        };
-        for (let prop of header
-            .slice(0, header_end_index)
-            .split("\n")
-            .filter((k) => k.startsWith("property "))) {
-            const [p, type, name] = prop.split(" ");
-            const arrayType = TYPE_MAP[type] || "getInt8";
-            types[name] = arrayType;
-            offsets[name] = row_offset;
-            row_offset += parseInt(arrayType.replace(/[^\d]/g, "")) / 8;
-        }
-        console.log("Bytes per row", row_offset, types, offsets);
-
-        let dataView = new DataView(
-            inputBuffer,
-            header_end_index + header_end.length,
-        );
-        let row = 0;
-        const attrs = new Proxy(
-            {},
-            {
-                get(target, prop) {
-                    if (!types[prop]) throw new Error(prop + " not found");
-                    return dataView[types[prop]](
-                        row * row_offset + offsets[prop],
-                        true,
-                    );
-                },
-            },
-        );
-
-        // 6*4 + 4 + 4 = 8*4
-        // XYZ - Position (Float32)
-        // XYZ - Scale (Float32)
-        // RGBA - colors (uint8)
-        // IJKL - quaternion/rot (uint8)
-        const rowLength = 3 * 4 + 3 * 4 + 4 + 4;
-
-		let result = [];
-
-        console.time("build buffer");
-        for (let j = 0; j < vertexCount; j++) {
-            row = j;
-
-            const position = new Float32Array(3);
-            const scales = new Float32Array(3);
-            const rgba = new Uint8ClampedArray(4);
-            let rot = new Float32Array(4);
-
-            if (types["scale_0"]) {
-                const qlen = Math.sqrt(
-                    attrs.rot_0 ** 2 +
-                        attrs.rot_1 ** 2 +
-                        attrs.rot_2 ** 2 +
-                        attrs.rot_3 ** 2,
-                );
-
-                rot[0] = (attrs.rot_0 / qlen);
-                rot[1] = (attrs.rot_1 / qlen);
-                rot[2] = (attrs.rot_2 / qlen);
-                rot[3] = (attrs.rot_3 / qlen);
-
-                scales[0] = Math.exp(attrs.scale_0);
-                scales[1] = Math.exp(attrs.scale_1);
-                scales[2] = Math.exp(attrs.scale_2);
-            } else {
-                scales[0] = 0.01;
-                scales[1] = 0.01;
-                scales[2] = 0.01;
-
-                rot[0] = 1.0;
-                rot[1] = 0;
-                rot[2] = 0;
-                rot[3] = 0;
-            }
-
-            position[0] = attrs.x;
-            position[1] = attrs.y;
-            position[2] = attrs.z;
-
-            if (types["f_dc_0"]) {
-                const SH_C0 = 0.28209479177387814;
-                rgba[0] = (0.5 + SH_C0 * attrs.f_dc_0) * 255;
-                rgba[1] = (0.5 + SH_C0 * attrs.f_dc_1) * 255;
-                rgba[2] = (0.5 + SH_C0 * attrs.f_dc_2) * 255;
-            } else {
-                rgba[0] = attrs.red;
-                rgba[1] = attrs.green;
-                rgba[2] = attrs.blue;
-            }
-            if (types["opacity"]) {
-                rgba[3] = (1 / (1 + Math.exp(-attrs.opacity))) * 255;
-            } else {
-                rgba[3] = 255;
-            }
-
-			const M = [
-                1.0 - 2.0 * (rot[2] * rot[2] + rot[3] * rot[3]),
-                2.0 * (rot[1] * rot[2] + rot[0] * rot[3]),
-                2.0 * (rot[1] * rot[3] - rot[0] * rot[2]),
-
-                2.0 * (rot[1] * rot[2] - rot[0] * rot[3]),
-                1.0 - 2.0 * (rot[1] * rot[1] + rot[3] * rot[3]),
-                2.0 * (rot[2] * rot[3] + rot[0] * rot[1]),
-
-                2.0 * (rot[1] * rot[3] + rot[0] * rot[2]),
-                2.0 * (rot[2] * rot[3] - rot[0] * rot[1]),
-                1.0 - 2.0 * (rot[1] * rot[1] + rot[2] * rot[2]),
-            ].map((k, i) => k * scales[Math.floor(i / 3)]);
-
-            const sigma = [
-                M[0] * M[0] + M[3] * M[3] + M[6] * M[6],
-                M[0] * M[1] + M[3] * M[4] + M[6] * M[7],
-                M[0] * M[2] + M[3] * M[5] + M[6] * M[8],
-                M[1] * M[1] + M[4] * M[4] + M[7] * M[7],
-                M[1] * M[2] + M[4] * M[5] + M[7] * M[8],
-                M[2] * M[2] + M[5] * M[5] + M[8] * M[8],
-            ];
-
-			if(j == 0)
-			{
-				console.log('JS SIGMA:');
-				console.log(sigma);
-			}
-			// const cov = [
-			// 	sigma[0] * 4, sigma[1] * 4, sigma[2] * 4,
-			// 	sigma[1] * 4, sigma[3] * 4, sigma[4] * 4,
-			// 	sigma[2] * 4, sigma[4] * 4, sigma[5] * 4
-			// ];
-
-			result.push(this.#packGaussian(sigma, position, new Float32Array([rgba[0] / 255.0, rgba[1] / 255.0, rgba[2] / 255.0, rgba[3] / 255.0]), j == 0))
-        }
-        console.timeEnd("build buffer");
-        return result;
-    }
-
 }
 
 customElements.define('splat-player', SplatPlayer);
