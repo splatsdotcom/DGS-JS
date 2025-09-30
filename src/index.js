@@ -98,7 +98,7 @@ export class SplatPlayer extends HTMLElement
 
 		const loadStartTime = performance.now();
 
-		this.#gaussians = MGS.loadPlyPacked(plyBuf)
+		this.#gaussians = MGS.loadPly(plyBuf)
 
 		const loadEndTime = performance.now();
 		console.log(`PLY loading took ${loadEndTime - loadStartTime}ms`);
@@ -289,6 +289,8 @@ export class SplatPlayer extends HTMLElement
 		let size = 0;
 		size += 4 * 4 * SIZEOF_FLOAT32; // view
 		size += 4 * 4 * SIZEOF_FLOAT32; // proj
+		size += 3 * SIZEOF_FLOAT32;     // cam pos
+		size += 1 * SIZEOF_UINT32;      // sh degree
 		size += 2 * SIZEOF_FLOAT32;     // focal lengths
 		size += 2 * SIZEOF_FLOAT32;     // viewport
 
@@ -302,36 +304,35 @@ export class SplatPlayer extends HTMLElement
 
 	#createGaussianBufs(gaussians)
 	{
-		const gaussianSize = 8 * SIZEOF_FLOAT32;
 		const renderedGaussianSize = 12 * SIZEOF_FLOAT32;
 		const renderedGaussianHeaderSize = 8 * SIZEOF_UINT32;
 
 		const gaussianBuf = device.createBuffer({
 			label: 'gaussians',
 
-			size: this.#gaussians.count() * gaussianSize,
+			size: gaussians.buffer.byteLength,
 			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
 		});
-		device.queue.writeBuffer(gaussianBuf, 0, gaussians.getBuffer());
+		device.queue.writeBuffer(gaussianBuf, 0, gaussians.buffer);
 
 		const renderedGaussianBuf = device.createBuffer({
 			label: 'rendered gaussians',
 
-			size: renderedGaussianHeaderSize + gaussians.count() * renderedGaussianSize,
+			size: renderedGaussianHeaderSize + gaussians.length * renderedGaussianSize,
 			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.INDIRECT
 		});
 
 		const gaussianDepthBuf = device.createBuffer({
 			label: 'gaussian depths',
 
-			size: gaussians.count() * SIZEOF_UINT32,
+			size: gaussians.length * SIZEOF_UINT32,
 			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
 		});
 
 		const gaussianIndexBuf = device.createBuffer({
 			label: 'gaussian indices',
 
-			size: gaussians.count() * SIZEOF_UINT32,
+			size: gaussians.length * SIZEOF_UINT32,
 			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.VERTEX
 		});
 
@@ -343,21 +344,30 @@ export class SplatPlayer extends HTMLElement
 		};
 	}
 
-	#updateParamsBuffer(view, proj, focalLengths, viewPort)
+	#updateParamsBuffer(view, proj, camPos, focalLengths, viewPort)
 	{
-		const data = new Float32Array(this.#paramsBuf.size / SIZEOF_FLOAT32);
+		const data = new ArrayBuffer(this.#paramsBuf.size);
+		const fData = new Float32Array(data);
+		const uData = new Uint32Array(data);
+
 		let offset = 0;
 
-		data.set(view, offset);
+		fData.set(view, offset);
 		offset += 4 * 4;
 
-		data.set(proj, offset);
+		fData.set(proj, offset);
 		offset += 4 * 4;
 
-		data.set(focalLengths, offset);
+		fData.set(camPos, offset);
+		offset += 3;
+
+		uData.set([this.#gaussians.shDegree], offset);
+		offset += 1;
+
+		fData.set(focalLengths, offset);
 		offset += 2;
 
-		data.set(viewPort, offset);
+		fData.set(viewPort, offset);
 		offset += 2;
 
 		device.queue.writeBuffer(this.#paramsBuf, 0, data);
@@ -457,7 +467,7 @@ export class SplatPlayer extends HTMLElement
 
 		//update bufs + get bind groups:
 		//---------------
-		this.#updateParamsBuffer(view, proj, focalLengths, viewPort);
+		this.#updateParamsBuffer(view, proj, this.#camPos, focalLengths, viewPort);
 		const bindGroups = this.#createBindGroups();
 
 		//create query buffers:
@@ -492,7 +502,7 @@ export class SplatPlayer extends HTMLElement
 		]);
 		device.queue.writeBuffer(this.#gaussianBufs.rendered, 0, renderedGaussianBufClearValue);
 
-		const gaussianDepthClearValue = new Uint32Array(this.#gaussians.count()).fill(0xFFFFFFFF);
+		const gaussianDepthClearValue = new Uint32Array(this.#gaussians.length).fill(0xFFFFFFFF);
 		device.queue.writeBuffer(this.#gaussianBufs.depths, 0, gaussianDepthClearValue); //TODO: please dont do this
 
 		const preprocessPass = encoder.beginComputePass({
@@ -506,7 +516,7 @@ export class SplatPlayer extends HTMLElement
 		preprocessPass.setPipeline(this.#preprocessPipeline);
 		preprocessPass.setBindGroup(0, bindGroups.preprocess);
 
-		preprocessPass.dispatchWorkgroups(Math.ceil(this.#gaussians.count() / GAUSSIAN_PREPROCESS_WORKGROUP_SIZE));
+		preprocessPass.dispatchWorkgroups(Math.ceil(this.#gaussians.length / GAUSSIAN_PREPROCESS_WORKGROUP_SIZE));
 
 		preprocessPass.end();
 
@@ -521,7 +531,7 @@ export class SplatPlayer extends HTMLElement
 		});
 
 		//TODO: actually read number of rendered gaussians!!!!
-		const sort = new RadixSortKernel(this.#gaussians.count(), this.#gaussianBufs.depths, this.#gaussianBufs.indices, 32);
+		const sort = new RadixSortKernel(this.#gaussians.length, this.#gaussianBufs.depths, this.#gaussianBufs.indices, 32);
 		sort.dispatch(sortPass);
 
 		sortPass.end();

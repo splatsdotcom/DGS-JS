@@ -9,6 +9,9 @@ struct Params
 {
 	view: mat4x4f,
 	proj: mat4x4f,
+	camPos: vec3f,
+
+	shDegree: u32,
 
 	focalLengths: vec2f,
 	viewPort: vec2f

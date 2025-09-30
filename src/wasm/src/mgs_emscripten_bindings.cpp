@@ -13,38 +13,23 @@ EMSCRIPTEN_BINDINGS(libmgs_js)
 	emscripten::class_<mgs::GaussianGroup>("GaussianGroup")
 		.smart_ptr<std::shared_ptr<mgs::GaussianGroup>>("GaussianGroup")
 
-		.function("count", &mgs::GaussianGroup::count)
+    	.property("length", &mgs::GaussianGroup::get_num_gaussians)
 
-		.function("sortedIndices", emscripten::optional_override([](mgs::GaussianGroup& self, float camX, float camY, float camZ)
-		{
-			auto indices = std::make_shared<std::vector<uint32_t>>(self.sorted_indices(vec3(camX, camY, camZ)));
-			return indices;
-		}))
+    	.property("shDegree", &mgs::GaussianGroup::get_sh_degree)
 
-		.function("getBuffer", emscripten::optional_override([](const mgs::GaussianGroup& self)
+		.property("buffer", emscripten::optional_override([](const mgs::GaussianGroup& self)
 		{
 			return emscripten::val(emscripten::typed_memory_view(
-				self.data().size() * sizeof(mgs::GaussianPacked), 
-				(const uint8_t*)self.data().data()
+				self.get_num_gaussians() * sizeof(mgs::GaussianPacked), 
+				(const uint8_t*)self.get_gaussians().data()
 			));
 		}));
 
-	emscripten::class_<std::vector<uint32_t>>("GaussianGroupIndices")
-		.smart_ptr<std::shared_ptr<std::vector<uint32_t>>>("GaussianGroupIndices")
-
-		.function("getBuffer", emscripten::optional_override([](std::vector<uint32_t>& self)
-		{
-			return emscripten::val(emscripten::typed_memory_view(
-				self.size() * sizeof(uint32_t), 
-				(const uint8_t*)self.data()
-			));
-		}));
-
-	emscripten::function("loadPlyPacked", emscripten::optional_override([](const emscripten::val& arg)
+	emscripten::function("loadPly", emscripten::optional_override([](const emscripten::val& arg)
 	{
 		emscripten::val bufView = emscripten::val::global("Uint8Array").new_(arg);
 		std::vector<uint8_t> data = emscripten::convertJSArrayToNumberVector<std::uint8_t>(bufView);
 
-		return std::make_shared<mgs::GaussianGroup>(mgs::ply::load_packed(data));
+		return std::make_shared<mgs::GaussianGroup>(mgs::ply::load(data));
 	}));
 }

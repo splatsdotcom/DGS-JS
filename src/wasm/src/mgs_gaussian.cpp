@@ -3,6 +3,7 @@
 #include <chrono>
 #include <iostream>
 #include <limits>
+#include <algorithm>
 
 namespace mgs
 {
@@ -14,13 +15,13 @@ static inline uint32_t float32_pack_2x16(float f1, float f2);
 
 //-------------------------------------------//
 
-Gaussian::Gaussian(const vec3& _pos, const vec3& _scale, const quaternion& _orient, const std::array<vec4, MGS_NUM_SPHERICAL_HARMONIC>& _harmonics) :
-	pos(_pos), scale(_scale), orient(_orient), harmonics(_harmonics)
+Gaussian::Gaussian(const vec3& _pos, const vec3& _scale, const quaternion& _orient, const vec4& _color, const std::array<vec3, MGS_MAX_SH_COEFFS_REST>& _sh) :
+	pos(_pos), scale(_scale), orient(_orient), color(_color), sh(_sh)
 {
 
 }
 
-GaussianPacked Gaussian::pack()
+GaussianPacked Gaussian::pack() const
 {
 	mat4 M = qm::scale(scale) * quaternion_to_mat4(orient);
 	float sigma[6] = {
@@ -36,91 +37,63 @@ GaussianPacked Gaussian::pack()
 	packed.covariance[0] = float32_pack_2x16(4.0f * sigma[0], 4.0f * sigma[1]);
 	packed.covariance[1] = float32_pack_2x16(4.0f * sigma[2], 4.0f * sigma[3]);
 	packed.covariance[2] = float32_pack_2x16(4.0f * sigma[4], 4.0f * sigma[5]);
+	packed.colorRG = float32_pack_2x16(color.r, color.g);
+	packed.colorBA = float32_pack_2x16(color.b, color.a);
 	packed.pos = pos;
 
-	for(uint32_t i = 0; i < MGS_NUM_SPHERICAL_HARMONIC; i++)
+	for(uint32_t i = 0; i < MGS_MAX_SH_COEFFS_REST; i += 2)
 	{
-		uint8_t r = (uint8_t)std::min(std::max(harmonics[i].r * 255.0f, 0.0f), 255.0f);
-		uint8_t g = (uint8_t)std::min(std::max(harmonics[i].g * 255.0f, 0.0f), 255.0f);
-		uint8_t b = (uint8_t)std::min(std::max(harmonics[i].b * 255.0f, 0.0f), 255.0f);
-		uint8_t a = (uint8_t)std::min(std::max(harmonics[i].a * 255.0f, 0.0f), 255.0f);
+		uint32_t idx1 = i + 0;
+		uint32_t idx2 = i + 1;
 
-		packed.harmonics[i] = (a << 24) | (b << 16) | (g << 8) | r;
+		float f1 = sh[std::min(idx1 / 3, MGS_MAX_SH_COEFFS_REST - 1)].v[idx1 % 3];
+		float f2 = sh[std::min(idx2 / 3, MGS_MAX_SH_COEFFS_REST - 1)].v[idx2 % 3];
+
+		packed.sh[i / 2] = float32_pack_2x16(f1, f2);
 	}
 
 	return packed;
 }
 
-Gaussian GaussianPacked::unpack()
+Gaussian GaussianPacked::unpack() const
 {
 	//TODO!
-	return Gaussian(vec3(0.0f), vec3(0.01f), quaternion_identity(), {vec4(0.0f)});
+	return Gaussian(
+		vec3(0.0f), 
+		vec3(0.01f), 
+		quaternion_identity(), 
+		vec4(0.0f),
+		std::array<vec3, MGS_MAX_SH_COEFFS_REST>()
+	);
 }
 
-GaussianGroup::GaussianGroup(const std::vector<GaussianPacked>& gaussians) :
-	m_gaussians(gaussians)
+GaussianGroup::GaussianGroup(const std::vector<GaussianPacked>& gaussians, uint32_t shDegree) :
+	m_gaussians(gaussians), m_shDegree(shDegree)
 {
 
 }
 
-uint32_t GaussianGroup::count() const
+GaussianGroup::GaussianGroup(const std::vector<Gaussian>& gaussians, uint32_t shDegree) :
+	m_shDegree(shDegree)
+{
+	m_gaussians.reserve(gaussians.size());
+	for(uint32_t i = 0; i < gaussians.size(); i++)
+		m_gaussians.push_back(gaussians[i].pack());
+}
+
+uint32_t GaussianGroup::get_num_gaussians() const
 {
 	return static_cast<uint32_t>(m_gaussians.size());
 }
 
-const std::vector<GaussianPacked>& GaussianGroup::data() const
+const std::vector<GaussianPacked>& GaussianGroup::get_gaussians() const
 {
 	return m_gaussians;
 }
 
-std::vector<uint32_t> GaussianGroup::sorted_indices(const vec3& camPos)
+uint32_t GaussianGroup::get_sh_degree() const
 {
-	//precompute depths + min/max:
-	//---------------
-	std::vector<float> depths(count());
-
-	float minDepth = std::numeric_limits<float>::infinity();
-	float maxDepth = -std::numeric_limits<float>::infinity();
-	for(uint32_t i = 0; i < count(); ++i)
-	{
-		depths[i] = dot(m_gaussians[i].pos - camPos, m_gaussians[i].pos - camPos);
-		minDepth = std::min(minDepth, depths[i]);
-		maxDepth = std::max(maxDepth, depths[i]);
-	}
-
-	//compute counts:
-	//---------------
-	const float scale = 65535.0f / (maxDepth - minDepth);
-	std::vector<uint32_t> counts(65536, 0);
-
-	for(uint32_t i = 0; i < count(); ++i) 
-	{
-		uint32_t idx = static_cast<uint32_t>((depths[i] - minDepth) * scale);
-		++counts[idx >= UINT16_MAX ? UINT16_MAX - 1 : idx];
-	}
-
-	//prefix sum:
-	//---------------
-	uint32_t total = 0;
-	for(uint32_t i = 0; i < 65536; ++i) 
-	{
-		uint32_t c = counts[i];
-		counts[i] = total;
-		total += c;
-	}
-
-	//output array:
-	//---------------
-	std::vector<uint32_t> sortedIndices(count());
-	for(uint32_t i = 0; i < count(); ++i) 
-	{
-		uint32_t depthIdx = static_cast<uint32_t>((depths[i] - minDepth) * scale);
-		uint32_t idx = counts[depthIdx]++;
-
-		sortedIndices[idx] = i;
-	}
-
-	return sortedIndices;
+	return m_shDegree;
 }
 
 //-------------------------------------------//

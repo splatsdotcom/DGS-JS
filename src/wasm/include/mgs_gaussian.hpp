@@ -18,7 +18,9 @@
 #include "quickmath.hpp"
 using namespace qm;
 
-#define MGS_NUM_SPHERICAL_HARMONIC 1
+#define MGS_MAX_SH_DEGREE 3U
+#define MGS_MAX_SH_COEFFS (3 * (MGS_MAX_SH_DEGREE + 1) * (MGS_MAX_SH_DEGREE + 1))
+#define MGS_MAX_SH_COEFFS_REST (MGS_MAX_SH_COEFFS - 3) //not including dc coeffs
 
 namespace mgs
 {
@@ -34,30 +36,31 @@ class GaussianPacked;
 class Gaussian
 {
 public:
-	Gaussian(const vec3& pos, const vec3& scale, const quaternion& orient, const std::array<vec4, MGS_NUM_SPHERICAL_HARMONIC>& harmonics);
+	Gaussian(const vec3& pos, const vec3& scale, const quaternion& orient, const vec4& color, const std::array<vec3, MGS_MAX_SH_COEFFS_REST>& sh);
 
-	GaussianPacked pack();
+	GaussianPacked pack() const;
 
 	vec3 pos;
 	vec3 scale;
 	quaternion orient;
 
-	std::array<vec4, MGS_NUM_SPHERICAL_HARMONIC> harmonics;
+	vec4 color;
+	std::array<vec3, MGS_MAX_SH_COEFFS_REST> sh;
 };
 
 /**
  * all parameters describing a 3D gaussian with spherical harmonics, compressed for rendering
  */
-class GaussianPacked
+class alignas(16) GaussianPacked
 {
 public:
-	Gaussian unpack();
+	Gaussian unpack() const;
 
 	uint32_t covariance[3];
-	std::array<uint32_t, MGS_NUM_SPHERICAL_HARMONIC> harmonics;
+	uint32_t colorRG; 
 	vec3 pos;
-
-	uint32_t padding;
+	uint32_t colorBA;
+	std::array<uint32_t, (MGS_MAX_SH_COEFFS_REST + 1) / 2> sh; //2-bytes each, packed into uints
 };
 
 /**
@@ -66,16 +69,17 @@ public:
 class GaussianGroup
 {
 public:
-	GaussianGroup(const std::vector<GaussianPacked>& gaussians);
-	// GaussianGroup(const std::vector<Gaussian>& gaussians);
+	GaussianGroup(const std::vector<GaussianPacked>& gaussians, uint32_t shDegree = 0);
+	GaussianGroup(const std::vector<Gaussian>& gaussians, uint32_t shDegree = 0);
 
-	uint32_t count() const;
-	const std::vector<GaussianPacked>& data() const;
+	uint32_t get_num_gaussians() const;
+	const std::vector<GaussianPacked>& get_gaussians() const;
 
-	std::vector<uint32_t> sorted_indices(const vec3& camPos);
+	uint32_t get_sh_degree() const;
 
 private:
 	std::vector<GaussianPacked> m_gaussians;
+	uint32_t m_shDegree;
 };
 
 }; //namespace mgs

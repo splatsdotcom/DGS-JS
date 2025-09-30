@@ -38,7 +38,6 @@ enum class PlyType
 
 const std::string PLY_HEADER_START = "ply";
 const std::string PLY_HEADER_END = "end_header\n";
-constexpr float SH_C0 = 0.28209479177387814f;
 
 static inline uint64_t ply_type_size(PlyType t);
 static inline PlyType ply_type_parse(std::string_view name);
@@ -48,23 +47,12 @@ static inline T ply_read(PlyType type, const uint8_t* buf);
 
 //-------------------------------------------//
 
-std::vector<Gaussian> load(const std::vector<uint8_t>& buf)
+GaussianGroup load(const std::vector<uint8_t>& buf)
 {
 	return load(static_cast<uint64_t>(buf.size()), buf.data());
 }
 
-std::vector<Gaussian> load(uint64_t size, const uint8_t* buf)
-{
-	//TODO
-	return {};
-}
-
-std::vector<GaussianPacked> load_packed(const std::vector<uint8_t>& buf)
-{
-	return load_packed(static_cast<uint64_t>(buf.size()), buf.data());
-}
-
-std::vector<GaussianPacked> load_packed(uint64_t size, const uint8_t* buf)
+GaussianGroup load(uint64_t size, const uint8_t* buf)
 {
 	//validate:
 	//-----------------	
@@ -123,15 +111,45 @@ std::vector<GaussianPacked> load_packed(uint64_t size, const uint8_t* buf)
 	}
 
 	if(vertexCount == 0)
-		return {};
+		return GaussianGroup(std::vector<GaussianPacked>());
 
 	if(properties.find("x") == properties.end() || properties.find("y") == properties.end() || properties.find("z") == properties.end())
 		throw std::runtime_error("PLY file did not contain gaussian positions!");
 
-	bool hasScale   = properties.find("scale_0") != properties.end() && properties.find("scale_1") != properties.end() && properties.find("scale_2") != properties.end();
-	bool hasOrient  = properties.find("rot_0"  ) != properties.end() && properties.find("rot_1"  ) != properties.end() && properties.find("rot_2"  ) != properties.end() && properties.find("rot_3") != properties.end();
-	bool hasColor   = properties.find("f_dc_0" ) != properties.end() && properties.find("f_dc_1" ) != properties.end() && properties.find("f_dc_2" ) != properties.end();
-	bool hasOpacity = properties.find("opacity") != properties.end();
+	bool hasScale   = properties.count("scale_0") && properties.count("scale_1") && properties.count("scale_2");
+	bool hasOrient  = properties.count("rot_0")   && properties.count("rot_1")   && properties.count("rot_2")   && properties.count("rot_3");
+	bool hasColor   = properties.count("f_dc_0")  && properties.count("f_dc_1")  && properties.count("f_dc_2");
+	bool hasOpacity = properties.count("opacity");
+
+	//detect spherical harmonics:
+	//-----------------	
+	uint32_t restTriplets = 0;
+	while(true)
+	{
+		std::string rName = "f_rest_" + std::to_string(restTriplets * 3 + 0);
+		std::string gName = "f_rest_" + std::to_string(restTriplets * 3 + 1);
+		std::string bName = "f_rest_" + std::to_string(restTriplets * 3 + 2);
+		if(properties.find(rName) == properties.end() ||
+		   properties.find(gName) == properties.end() ||
+		   properties.find(bName) == properties.end())
+			break;
+		
+		restTriplets++;
+	}
+
+	uint32_t totalCoeffs = restTriplets + (hasColor ? 1 : 0);
+	uint32_t degree = 0;
+	while((degree + 1) * (degree + 1) < totalCoeffs) 
+		degree++;
+
+	if((degree + 1) * (degree + 1) != totalCoeffs)
+		throw std::runtime_error("Invalid PLY file - did not contain a valid number of spherical harmonic coefficients");
+
+	if(degree > MGS_MAX_SH_DEGREE)
+	{
+		degree = MGS_MAX_SH_DEGREE;
+		totalCoeffs = (degree + 1) * (degree + 1);
+	}
 
 	//validate data section:
 	//-----------------	
@@ -146,8 +164,8 @@ std::vector<GaussianPacked> load_packed(uint64_t size, const uint8_t* buf)
 		return ply_read<float>(prop.first, row + prop.second);
 	};
 
-	std::vector<GaussianPacked> result;
-	result.reserve(vertexCount);
+	std::vector<GaussianPacked> gaussians;
+	gaussians.reserve(vertexCount);
 
 	for(uint64_t i = 0; i < vertexCount; i++) 
 	{
@@ -177,21 +195,38 @@ std::vector<GaussianPacked> load_packed(uint64_t size, const uint8_t* buf)
 				rot = quaternion(r1 / len, r2 / len, r3 / len, r0 / len);
 		}
 
-		if(hasColor) 
+		if(hasColor)
 		{
-			color.x = 0.5f + SH_C0 * get(row, "f_dc_0");
-			color.y = 0.5f + SH_C0 * get(row, "f_dc_1");
-			color.z = 0.5f + SH_C0 * get(row, "f_dc_2");
+			color.x = get(row, "f_dc_0");
+			color.y = get(row, "f_dc_1");
+			color.z = get(row, "f_dc_2");
 		}
 
 		if(hasOpacity)
 			color.w = 1.0f / (1.0f + std::exp(-get(row, "opacity")));
 
-		Gaussian g(pos, scale, rot, { color });
-		result.push_back(g.pack());
+		std::array<vec3, MGS_MAX_SH_COEFFS_REST> sh;
+
+		for(uint32_t j = 0; j < totalCoeffs; j++)
+		{
+			std::string rName = "f_rest_" + std::to_string(j * 3 + 0);
+			std::string gName = "f_rest_" + std::to_string(j * 3 + 1);
+			std::string bName = "f_rest_" + std::to_string(j * 3 + 2);
+
+			vec3 coeff = {
+				get(row, rName.c_str()),
+				get(row, gName.c_str()),
+				get(row, bName.c_str())
+			};
+
+			sh[j] = coeff;
+		}
+
+		Gaussian g(pos, scale, rot, color, sh);
+		gaussians.push_back(g.pack());
 	}
 
-	return result;
+	return GaussianGroup(gaussians, degree);
 }
 
 //-------------------------------------------//

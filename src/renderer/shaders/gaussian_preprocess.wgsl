@@ -5,6 +5,10 @@
 
 override WORKGROUP_SIZE: u32;
 
+const MAX_SH_DEGREE = 3u;
+const MAX_SH_COEFFS = (3 * (MAX_SH_DEGREE + 1) * (MAX_SH_DEGREE + 1));
+const MAX_SH_COEFFS_REST = (MAX_SH_COEFFS - 3); //not including dc coeffs
+
 const SH_C0 = 0.28209479177387814;
 
 const SH_C1 = 0.4886025119029199;
@@ -33,6 +37,9 @@ struct Params
 {
 	view: mat4x4f,
 	proj: mat4x4f,
+	camPos: vec3f,
+
+	shDegree: u32,
 
 	focalLengths: vec2f,
 	viewPort: vec2f
@@ -41,8 +48,10 @@ struct Params
 struct Gaussian
 {
 	cov: vec3u,
-	color: u32,
-	mean: vec3f
+	colorRG: u32,
+	mean: vec3f,
+	colorBA: u32,
+	sh: array<u32, (MAX_SH_COEFFS_REST + 1) / 2>
 };
 
 struct RenderedGaussian
@@ -102,6 +111,16 @@ fn f16_to_u32_ordered(x: f32) -> u32
     return bits;
 }
 
+fn get_sh_coeffs(gaussianIdx: u32, i: u32) -> vec3f
+{
+	let idx = (i - 1) * 3u; //dc coeff is stored separately
+
+	return vec3f(
+		unpack2x16float(u_gaussians[gaussianIdx].sh[(idx + 0) / 2])[(idx + 0) % 2],
+		unpack2x16float(u_gaussians[gaussianIdx].sh[(idx + 1) / 2])[(idx + 1) % 2],
+		unpack2x16float(u_gaussians[gaussianIdx].sh[(idx + 2) / 2])[(idx + 2) % 2]
+	);
+}
 
 @compute @workgroup_size(WORKGROUP_SIZE) 
 fn preprocess(@builtin(global_invocation_id) GID: vec3u, @builtin(local_invocation_id) LID: vec3u)
@@ -110,23 +129,14 @@ fn preprocess(@builtin(global_invocation_id) GID: vec3u, @builtin(local_invocati
 
 	//find clip pos of mean:
 	//---------------
-	let idx = GID.x;
-
-	var g: Gaussian;
-	if(idx < arrayLength(&u_gaussians))
-	{
-		g = u_gaussians[idx];
-	}
-	else
+	var idx = GID.x;
+	if(idx >= arrayLength(&u_gaussians))
 	{
 		culled = true;
-		g = Gaussian(
-			vec3u(0), //TODO: set this 
-			0, vec3f(0.0)
-		);
+		idx = arrayLength(&u_gaussians) - 1;
 	}
 
-	let camPos = u_params.view * vec4f(g.mean, 1.0);
+	let camPos = u_params.view * vec4f(u_gaussians[idx].mean, 1.0);
 	let clipPos = u_params.proj * camPos;
 
 	//cull if outside of camera view:
@@ -140,9 +150,9 @@ fn preprocess(@builtin(global_invocation_id) GID: vec3u, @builtin(local_invocati
 
 	//unpack covariance matrix:
 	//---------------
-	let c0 = unpack2x16float(g.cov.x);
-	let c1 = unpack2x16float(g.cov.y);
-	let c2 = unpack2x16float(g.cov.z);
+	let c0 = unpack2x16float(u_gaussians[idx].cov.x);
+	let c1 = unpack2x16float(u_gaussians[idx].cov.y);
+	let c2 = unpack2x16float(u_gaussians[idx].cov.z);
 
 	let cov = mat3x3f(
 		vec3f(c0.x, c0.y, c1.x),
@@ -186,10 +196,56 @@ fn preprocess(@builtin(global_invocation_id) GID: vec3u, @builtin(local_invocati
 	let major = min(sqrt(2.0 * lambda1), 1024.0) * v1;
 	let minor = min(sqrt(2.0 * lambda2), 1024.0) * v2;
 
-	//compute color:
+	//evalate sh:
 	//---------------
-	let albedo = unpack4x8unorm(g.color);
-	let color = clamp(clipPos.z / clipPos.w + 1.0, 0.0, 1.0) * albedo;
+	let dc = vec4f(
+		unpack2x16float(u_gaussians[idx].colorRG),
+		unpack2x16float(u_gaussians[idx].colorBA)
+	);
+
+	let dir = normalize(u_gaussians[idx].mean - u_params.camPos);
+
+	var color = SH_C0 * dc.rgb;
+	if(u_params.shDegree > 0)
+	{
+		let x = dir.x;
+		let y = dir.y;
+		let z = dir.z;
+		color += -SH_C1 * y * get_sh_coeffs(idx, 1) + 
+		          SH_C1 * z * get_sh_coeffs(idx, 2) - 
+		          SH_C1 * x * get_sh_coeffs(idx, 3);
+
+		if(u_params.shDegree > 1)
+		{
+            let xx = dir.x * dir.x;
+            let yy = dir.y * dir.y;
+            let zz = dir.z * dir.z;
+            let xy = dir.x * dir.y;
+            let yz = dir.y * dir.z;
+            let xz = dir.x * dir.z;
+
+            color += SH_C2[0] * xy                   * get_sh_coeffs(idx, 4) + 
+			         SH_C2[1] * yz                   * get_sh_coeffs(idx, 5) + 
+			         SH_C2[2] * (2.0 * zz - xx - yy) * get_sh_coeffs(idx, 6) + 
+			         SH_C2[3] * xz                   * get_sh_coeffs(idx, 7) + 
+			         SH_C2[4] * (xx - yy)            * get_sh_coeffs(idx, 8);
+
+			if(u_params.shDegree > 2)
+			{
+				color += SH_C3[0] * y * (3.0 * xx - yy)                  * get_sh_coeffs(idx,  9) + 
+				         SH_C3[1] * xy * z                               * get_sh_coeffs(idx, 10) + 
+				         SH_C3[2] * y * (4.0 * zz - xx - yy)             * get_sh_coeffs(idx, 11) + 
+				         SH_C3[3] * z * (2.0 * zz - 3.0 * xx - 3.0 * yy) * get_sh_coeffs(idx, 12) + 
+				         SH_C3[4] * x * (4.0 * zz - xx - yy)             * get_sh_coeffs(idx, 13) + 
+				         SH_C3[5] * z * (xx - yy)                        * get_sh_coeffs(idx, 14) + 
+				         SH_C3[6] * x * (xx - 3.0 * yy)                  * get_sh_coeffs(idx, 15);
+			}
+		}
+	}
+
+	color += 0.5;
+
+	let rgba = clamp(clipPos.z / clipPos.w + 1.0, 0.0, 1.0) * vec4f(color, dc.a);
 
 	//determine write position within global buffer:
 	//---------------
@@ -226,10 +282,10 @@ fn preprocess(@builtin(global_invocation_id) GID: vec3u, @builtin(local_invocati
 	{
 		u_renderedGaussians.gaussians[writePos].minor = minor;
 		u_renderedGaussians.gaussians[writePos].major = major;
-		u_renderedGaussians.gaussians[writePos].color = color;
+		u_renderedGaussians.gaussians[writePos].color = rgba;
 		u_renderedGaussians.gaussians[writePos].center = clipPos.xy / clipPos.w;
 
-		u_gaussianDepths [writePos] = f32_to_u32_ordered(camPos.z) ^ 0xFFFFFFFFu;
+		u_gaussianDepths [writePos] = ~f32_to_u32_ordered(camPos.z);
 		u_gaussianIndices[writePos] = writePos;
 	}
 }
