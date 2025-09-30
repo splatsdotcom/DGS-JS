@@ -149,6 +149,7 @@ GaussianGroup load(uint64_t size, const uint8_t* buf)
 	{
 		degree = MGS_MAX_SH_DEGREE;
 		totalCoeffs = (degree + 1) * (degree + 1);
+		restTriplets = totalCoeffs - (hasColor ? 1 : 0);
 	}
 
 	//validate data section:
@@ -207,17 +208,17 @@ GaussianGroup load(uint64_t size, const uint8_t* buf)
 
 		std::array<vec3, MGS_MAX_SH_COEFFS_REST> sh;
 
-		for(uint32_t j = 0; j < totalCoeffs; j++)
+		for(uint32_t j = 0; j < restTriplets; j++)
 		{
 			std::string rName = "f_rest_" + std::to_string(j * 3 + 0);
 			std::string gName = "f_rest_" + std::to_string(j * 3 + 1);
 			std::string bName = "f_rest_" + std::to_string(j * 3 + 2);
 
-			vec3 coeff = {
+			vec3 coeff(
 				get(row, rName.c_str()),
 				get(row, gName.c_str()),
 				get(row, bName.c_str())
-			};
+			);
 
 			sh[j] = coeff;
 		}
