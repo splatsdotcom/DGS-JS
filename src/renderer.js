@@ -44,6 +44,9 @@ class Renderer
 
 	draw(view, proj, timestamp)
 	{
+		if(!this.#gaussians)
+			return;
+
 		//get timing data:
 		//-----------------
 		var dt = 0.0;

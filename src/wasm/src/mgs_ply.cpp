@@ -36,6 +36,15 @@ enum class PlyType
 	Unknown
 };
 
+/**
+ * a type + offset for a single property in a PLY
+ */
+struct PlyProp 
+{
+	PlyType type;
+	uint64_t offset;
+};
+
 const std::string PLY_HEADER_START = "ply";
 const std::string PLY_HEADER_END = "end_header\n";
 
@@ -69,14 +78,13 @@ GaussianGroup load(uint64_t size, const uint8_t* buf)
 	if(headerEnd == std::string::npos)
 		throw std::runtime_error("Invalid PLY file - no header end found!");
 
-	std::string headerStr = std::string(reinterpret_cast<const char*>(buf), headerEnd);
+	std::string headerStr(reinterpret_cast<const char*>(buf), headerEnd);
 	std::istringstream headerStream(headerStr);
 
 	//read properties:
 	//-----------------	
 	uint64_t vertexCount = 0;
-	
-	std::unordered_map<std::string, std::pair<PlyType, uint64_t>> properties;
+	std::unordered_map<std::string, PlyProp> properties;
 	uint64_t rowStride = 0;
 
 	std::string line;
@@ -88,7 +96,7 @@ GaussianGroup load(uint64_t size, const uint8_t* buf)
 		{
 			std::istringstream iss(line);
 			std::string tmp; 
-			
+
 			iss >> tmp >> tmp >> vertexCount;
 		}
 		else if(line.rfind("property", 0) == 0) 
@@ -105,35 +113,86 @@ GaussianGroup load(uint64_t size, const uint8_t* buf)
 
 			if(properties.find(nameStr) != properties.end())
 				throw std::runtime_error("Invalid PLY file - contains duplicate properties!");
-			
-			properties[nameStr] = { t, offset };
+
+			properties.emplace(nameStr, PlyProp{t, offset});
 		}
 	}
 
 	if(vertexCount == 0)
 		return GaussianGroup(std::vector<GaussianPacked>());
 
-	if(properties.find("x") == properties.end() || properties.find("y") == properties.end() || properties.find("z") == properties.end())
-		throw std::runtime_error("PLY file did not contain gaussian positions!");
+	//prefetch property offsets + types:
+	//-----------------	
+	auto findProp = [&](const std::string& name) -> const PlyProp& {
+		auto it = properties.find(name);
+		if(it == properties.end())
+			throw std::runtime_error("PLY file missing property: " + name);
+
+		return it->second;
+	};
+
+	struct Accessors 
+	{
+		const PlyProp *x, *y, *z;
+		const PlyProp *scale[3];
+		const PlyProp *rot[4];
+		const PlyProp *color[3];
+		const PlyProp *opacity;
+
+		std::vector<std::array<const PlyProp*, 3>> rest;
+	};
+
+	Accessors acc;
+
+	acc.x = &findProp("x");
+	acc.y = &findProp("y");
+	acc.z = &findProp("z");
 
 	bool hasScale   = properties.count("scale_0") && properties.count("scale_1") && properties.count("scale_2");
 	bool hasOrient  = properties.count("rot_0")   && properties.count("rot_1")   && properties.count("rot_2")   && properties.count("rot_3");
 	bool hasColor   = properties.count("f_dc_0")  && properties.count("f_dc_1")  && properties.count("f_dc_2");
 	bool hasOpacity = properties.count("opacity");
 
-	//detect spherical harmonics:
+	if(hasScale) 
+	{
+		acc.scale[0] = &findProp("scale_0");
+		acc.scale[1] = &findProp("scale_1");
+		acc.scale[2] = &findProp("scale_2");
+	}
+
+	if(hasOrient) 
+	{
+		acc.rot[0] = &findProp("rot_0");
+		acc.rot[1] = &findProp("rot_1");
+		acc.rot[2] = &findProp("rot_2");
+		acc.rot[3] = &findProp("rot_3");
+	}
+
+	if(hasColor) 
+	{
+		acc.color[0] = &findProp("f_dc_0");
+		acc.color[1] = &findProp("f_dc_1");
+		acc.color[2] = &findProp("f_dc_2");
+	}
+
+	if(hasOpacity) 
+		acc.opacity = &findProp("opacity");
+
+	//get SH properties:
 	//-----------------	
 	uint32_t restTriplets = 0;
-	while(true)
+	while(true) 
 	{
 		std::string rName = "f_rest_" + std::to_string(restTriplets * 3 + 0);
 		std::string gName = "f_rest_" + std::to_string(restTriplets * 3 + 1);
 		std::string bName = "f_rest_" + std::to_string(restTriplets * 3 + 2);
+
 		if(properties.find(rName) == properties.end() ||
 		   properties.find(gName) == properties.end() ||
 		   properties.find(bName) == properties.end())
 			break;
-		
+
+		acc.rest.push_back({ &findProp(rName), &findProp(gName), &findProp(bName) });
 		restTriplets++;
 	}
 
@@ -150,6 +209,7 @@ GaussianGroup load(uint64_t size, const uint8_t* buf)
 		degree = MGS_MAX_SH_DEGREE;
 		totalCoeffs = (degree + 1) * (degree + 1);
 		restTriplets = totalCoeffs - (hasColor ? 1 : 0);
+		acc.rest.resize(restTriplets);
 	}
 
 	//validate data section:
@@ -159,10 +219,8 @@ GaussianGroup load(uint64_t size, const uint8_t* buf)
 	if(dataStart + vertexCount * rowStride > dataEnd)
 		throw std::runtime_error("Invalid PLY file - too small for specified data!");
 
-	auto get = [&](const uint8_t* row, const char* name) -> float 
-	{
-		auto prop = properties[name];
-		return ply_read<float>(prop.first, row + prop.second);
+	auto readProp = [&](const PlyProp* p, const uint8_t* row) -> float {
+		return ply_read<float>(p->type, row + p->offset);
 	};
 
 	std::vector<GaussianPacked> gaussians;
@@ -172,58 +230,53 @@ GaussianGroup load(uint64_t size, const uint8_t* buf)
 	{
 		const uint8_t* row = dataStart + i * rowStride;
 
-		vec3 pos = { get(row, "x"), get(row, "y"), get(row, "z") };
-		vec3 scale = vec3(0.01f);
+		vec3 pos = { readProp(acc.x, row), readProp(acc.y, row), readProp(acc.z, row) };
+		vec3 scale(0.01f);
 		quaternion rot = quaternion_identity();
-		vec4 color = vec4(1.0f);
+		vec4 color(1.0f);
 
 		if(hasScale) 
 		{
-			scale.x = std::exp(get(row, "scale_0"));
-			scale.y = std::exp(get(row, "scale_1"));
-			scale.z = std::exp(get(row, "scale_2"));
+			scale.x = std::exp(readProp(acc.scale[0], row));
+			scale.y = std::exp(readProp(acc.scale[1], row));
+			scale.z = std::exp(readProp(acc.scale[2], row));
 		}
 
-		if(hasOrient)
+		if(hasOrient) 
 		{
-			float r0 = get(row, "rot_0");
-			float r1 = get(row, "rot_1");
-			float r2 = get(row, "rot_2");
-			float r3 = get(row, "rot_3");
+			float r0 = readProp(acc.rot[0], row);
+			float r1 = readProp(acc.rot[1], row);
+			float r2 = readProp(acc.rot[2], row);
+			float r3 = readProp(acc.rot[3], row);
 
 			float len = std::sqrt(r0 * r0 + r1 * r1 + r2 * r2 + r3 * r3);
 			if(len > 1e-8f)
 				rot = quaternion(r1 / len, r2 / len, r3 / len, r0 / len);
 		}
 
-		if(hasColor)
+		if(hasColor) 
 		{
-			color.x = get(row, "f_dc_0");
-			color.y = get(row, "f_dc_1");
-			color.z = get(row, "f_dc_2");
+			color.x = readProp(acc.color[0], row);
+			color.y = readProp(acc.color[1], row);
+			color.z = readProp(acc.color[2], row);
 		}
 
 		if(hasOpacity)
-			color.w = 1.0f / (1.0f + std::exp(-get(row, "opacity")));
+			color.w = 1.0f / (1.0f + std::exp(-readProp(acc.opacity, row)));
 
-		std::array<vec3, MGS_MAX_SH_COEFFS_REST> sh;
-
-		for(uint32_t j = 0; j < restTriplets; j++)
+		std::array<vec3, MGS_MAX_SH_COEFFS_REST> sh{};
+		for(uint32_t j=0;j<restTriplets;j++) 
 		{
-			std::string rName = "f_rest_" + std::to_string(j * 3 + 0);
-			std::string gName = "f_rest_" + std::to_string(j * 3 + 1);
-			std::string bName = "f_rest_" + std::to_string(j * 3 + 2);
+			const auto& trip = acc.rest[j];
 
-			vec3 coeff(
-				get(row, rName.c_str()),
-				get(row, gName.c_str()),
-				get(row, bName.c_str())
+			sh[j] = vec3(
+				readProp(trip[0],row),
+				readProp(trip[1],row),
+				readProp(trip[2],row)
 			);
-
-			sh[j] = coeff;
 		}
 
-		Gaussian g(pos, scale, rot, color, sh);
+		Gaussian g(pos,scale,rot,color,sh);
 		gaussians.push_back(g.pack());
 	}
 

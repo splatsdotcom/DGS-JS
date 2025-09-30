@@ -6,7 +6,10 @@
 const CANVAS_RESOLUTION_SCALE = 2;
 
 //TEMP
-const PLY_PATH = "output.ply";
+const PLY_DIR = "easyvolcap_fashion";
+const PLY_FRAME_COUNT = 30;
+const PLY_FRAMERATE = 30.0;
+
 const CAMERA_SPEED = 0.1;
 
 //-------------------------//
@@ -71,27 +74,19 @@ export class SplatPlayer extends HTMLElement
 			}
 		});
 
-		//initialize gaussians:
+		//load frames:
 		//---------------
-		const fetchResponse = await fetch(PLY_PATH);
-		if(!fetchResponse.ok)
-			throw new Error("Failed to fetch test .ply");
+		for(let i = 0; i < PLY_FRAME_COUNT; i++) 
+		{
+			const loadStartTime = performance.now();
 
-		const plyBuf = await fetchResponse.arrayBuffer()
+			this.#frames.push(await this.#loadFrame(i));
 
-		const loadStartTime = performance.now();
+			const loadEndTime = performance.now();
+			console.log(`Loaded PLY for frame ${i} in ${loadEndTime - loadStartTime}ms`);
+		}
 
-		this.#gaussians = MGS.loadPly(plyBuf)
-
-		const loadEndTime = performance.now();
-		console.log(`PLY loading took ${loadEndTime - loadStartTime}ms`);
-
-		const uploadStartTime = performance.now();
-
-		this.#renderer.setGaussians(this.#gaussians);
-
-		const uploadEndTime = performance.now();
-		console.log(`GPU upload took ${uploadEndTime - uploadStartTime}ms`);
+		this.#renderer.setGaussians(this.#frames[0]);
 
 		//begin main loop:
 		//---------------
@@ -104,8 +99,11 @@ export class SplatPlayer extends HTMLElement
 
 	#canvas = null;
 	#renderer = null;
-	#gaussians = null;
+	#frames = [];
+
 	#lastRenderTime = null;
+	#videoTime = 0.0;
+	#curFrame = 0;
 
 	//TEMP: we need a proper camera system!
 	#camPos     = vec3.zero(vec3.create());
@@ -116,6 +114,17 @@ export class SplatPlayer extends HTMLElement
 	#lastMouse = [0, 0];
 
 	//-------------------------//
+
+	async #loadFrame(idx)
+	{
+		const fetchResponse = await fetch(PLY_DIR + `/${idx}.ply`);
+		if(!fetchResponse.ok)
+			throw new Error("Failed to fetch .ply frame");
+
+		const plyBuf = await fetchResponse.arrayBuffer()
+
+		return MGS.loadPly(plyBuf)
+	}
 
 	#updateCamera(dt)
 	{
@@ -142,7 +151,7 @@ export class SplatPlayer extends HTMLElement
 
 	#mainLoop(timestamp)
 	{
-		//update camera:
+		//update timing:
 		//---------------
 		timestamp /= 1000.0; //we want dt in seconds
 
@@ -150,6 +159,17 @@ export class SplatPlayer extends HTMLElement
 		if(this.#lastRenderTime)
 			dt = timestamp - this.#lastRenderTime;
 
+		this.#videoTime += dt;
+		let frame = Math.round(this.#videoTime * PLY_FRAMERATE) % PLY_FRAME_COUNT;
+
+		if(frame !== this.#curFrame)
+		{
+			this.#renderer.setGaussians(this.#frames[frame]);
+			this.#curFrame = frame;
+		}
+
+		//update camera:
+		//---------------
 		this.#lastRenderTime = timestamp;
 		this.#updateCamera(dt);
 
