@@ -7,7 +7,7 @@ import { device } from './context.js';
 
 import PrefixSumKernel from "./prefix_sum_kernel.js"
 import RADIX_SORT_BLOCK_SUM_SRC from './shaders/radix_sort_block_sum.wgsl?raw';
-import RADIX_SORT_REORDER_SRC  from './shaders/radix_sort_reorder.wgsl?raw';
+import RADIX_SORT_REORDER_SRC   from './shaders/radix_sort_reorder.wgsl?raw';
 
 //-------------------------//
 

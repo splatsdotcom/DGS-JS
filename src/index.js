@@ -21,11 +21,11 @@ import MGSModule from './wasm/mgs.js'
 const MGS = await MGSModule();
 
 import { mat4, vec3 } from 'gl-matrix';
-import { GPU_PROFILING, device } from './renderer/context.js';
-import RadixSortKernel from './renderer/radix_sort_kernel.js';
+import { GPU_PROFILING, device } from './context.js';
+import RadixSortKernel from './radix_sort_kernel.js';
 
-import GAUSSIAN_PREPROCESS_SHADER_SRC from './renderer/shaders/gaussian_preprocess.wgsl?raw';
-import GAUSSIAN_RASTERIZE_SHADER_SRC  from './renderer/shaders/gaussian_rasterize.wgsl?raw';
+import GAUSSIAN_PREPROCESS_SHADER_SRC from './shaders/gaussian_preprocess.wgsl?raw';
+import GAUSSIAN_RASTERIZE_SHADER_SRC  from './shaders/gaussian_rasterize.wgsl?raw';
 
 //-------------------------//
 
