@@ -28,11 +28,69 @@ export class SplatPlayer extends HTMLElement
 	{
 		super();
 
+		const root = this.attachShadow({ mode: 'open' });
+
+		//create canvas:
+		//---------------
 		this.#canvas = document.createElement('canvas');
 		this.#canvas.style.width = '100%';
 		this.#canvas.style.height = '100%';
 		this.#canvas.style.display = 'block';
-		this.attachShadow({ mode: 'open' }).appendChild(this.#canvas);
+		root.appendChild(this.#canvas);
+
+		//create loading overlay:
+		//---------------
+		this.#loader = document.createElement('div');
+		Object.assign(this.#loader.style, {
+			position: 'absolute',
+			top: '50%',
+			left: '50%',
+			transform: 'translate(-50%, -50%)',
+			display: 'flex',
+			flexDirection: 'column',
+			alignItems: 'center',
+			gap: '8px',
+			fontFamily: 'sans-serif',
+			color: 'white',
+			pointerEvents: 'none' // don’t block input
+		});
+		root.appendChild(this.#loader);
+
+		//create progress bar container:
+		//---------------
+		const barContainer = document.createElement('div');
+		Object.assign(barContainer.style, {
+			width: '300px',
+			height: '16px',
+			border: '2px solid white',
+			borderRadius: '8px',
+			overflow: 'hidden',
+			background: 'rgba(255,255,255,0.1)'
+		});
+		this.#loader.appendChild(barContainer);
+
+		//create progress bar fill:
+		//---------------
+		this.#progress = document.createElement('div');
+		Object.assign(this.#progress.style, {
+			width: '0%',
+			height: '100%',
+			background: 'white',
+			borderRadius: '8px 0 0 8px',
+			transition: 'width 0.1s linear'
+		});
+		barContainer.appendChild(this.#progress);
+
+		//create progress text:
+		//---------------
+		this.#percentText = document.createElement('div');
+		Object.assign(this.#percentText.style, {
+			fontSize: '14px',
+			color: 'white',
+			textShadow: '0 0 3px black'
+		});
+		this.#percentText.textContent = '0%';
+		this.#loader.appendChild(this.#percentText);
 	}
 
 	async connectedCallback() 
@@ -76,15 +134,8 @@ export class SplatPlayer extends HTMLElement
 
 		//load frames:
 		//---------------
-		for(let i = 0; i < PLY_FRAME_COUNT; i++) 
-		{
-			const loadStartTime = performance.now();
-
-			this.#frames.push(await this.#loadFrame(i));
-
-			const loadEndTime = performance.now();
-			console.log(`Loaded PLY for frame ${i} in ${loadEndTime - loadStartTime}ms`);
-		}
+		await this.#loadAllFrames();
+		this.#loader.style.display = 'none';
 
 		this.#renderer.setGaussians(this.#frames[0]);
 
@@ -95,7 +146,31 @@ export class SplatPlayer extends HTMLElement
 		});
 	}
 
+	async #loadAllFrames() 
+	{
+		let numLoaded = 0;
+
+		const promises = Array.from({ length: PLY_FRAME_COUNT }, (_, i) => 
+			this.#loadFrame(i).then(frame => {
+				this.#frames[i] = frame;
+				
+				numLoaded++;
+				const percent = Math.floor((numLoaded / PLY_FRAME_COUNT) * 100);
+				this.#progress.style.width = `${percent}%`;
+				this.#percentText.textContent = `${percent}%`;
+
+				return frame;
+			})
+		);
+
+		await Promise.all(promises);
+	}
+
 	//-------------------------//
+
+	#loader = null;
+	#progress = null;
+	#percentText = null;
 
 	#canvas = null;
 	#renderer = null;
