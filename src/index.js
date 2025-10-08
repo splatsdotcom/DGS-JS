@@ -6,9 +6,9 @@
 const CANVAS_RESOLUTION_SCALE = 2;
 
 //TEMP
-const PLY_DIR = "easyvolcap_fashion";
-const PLY_FRAME_COUNT = 30;
-const PLY_FRAMERATE = 30.0;
+const GS_DIR = "easyvolcap_fashion";
+const GS_FRAME_COUNT = 30;
+const GS_FRAMERATE = 30.0;
 
 const CAMERA_SPEED = 0.1;
 
@@ -150,12 +150,12 @@ export class SplatPlayer extends HTMLElement
 	{
 		let numLoaded = 0;
 
-		const promises = Array.from({ length: PLY_FRAME_COUNT }, (_, i) => 
+		const promises = Array.from({ length: GS_FRAME_COUNT }, (_, i) => 
 			this.#loadFrame(i).then(frame => {
 				this.#frames[i] = frame;
 				
 				numLoaded++;
-				const percent = Math.floor((numLoaded / PLY_FRAME_COUNT) * 100);
+				const percent = Math.floor((numLoaded / GS_FRAME_COUNT) * 100);
 				this.#progress.style.width = `${percent}%`;
 				this.#percentText.textContent = `${percent}%`;
 
@@ -192,13 +192,15 @@ export class SplatPlayer extends HTMLElement
 
 	async #loadFrame(idx)
 	{
-		const fetchResponse = await fetch(PLY_DIR + `/${idx}.ply`);
+		const fetchResponse = await fetch(GS_DIR + `/${idx}.gs`);
 		if(!fetchResponse.ok)
-			throw new Error("Failed to fetch .ply frame");
+			throw new Error("Failed to fetch .gs frame");
 
-		const plyBuf = await fetchResponse.arrayBuffer()
+		const gsBuf = await fetchResponse.arrayBuffer()
 
-		return MGS.loadPly(plyBuf)
+		const group = new MGS.GaussianGroup();
+		group.deserialize(gsBuf);
+		return group;
 	}
 
 	#updateCamera(dt)
@@ -235,7 +237,7 @@ export class SplatPlayer extends HTMLElement
 			dt = timestamp - this.#lastRenderTime;
 
 		this.#videoTime += dt;
-		let frame = Math.round(this.#videoTime * PLY_FRAMERATE) % PLY_FRAME_COUNT;
+		let frame = Math.round(this.#videoTime * GS_FRAMERATE) % GS_FRAME_COUNT;
 
 		if(frame !== this.#curFrame)
 		{

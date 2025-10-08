@@ -69,6 +69,7 @@ public:
 class GaussianGroup
 {
 public:
+	GaussianGroup() = default;
 	GaussianGroup(const std::vector<GaussianPacked>& gaussians, uint32_t shDegree = 0);
 	GaussianGroup(const std::vector<Gaussian>& gaussians, uint32_t shDegree = 0);
 
@@ -76,6 +77,9 @@ public:
 	const std::vector<GaussianPacked>& get_gaussians() const;
 
 	uint32_t get_sh_degree() const;
+
+	std::vector<uint8_t> serialize() const;
+	void deserialize(const std::vector<uint8_t>& serialized);
 
 private:
 	std::vector<GaussianPacked> m_gaussians;

@@ -8,6 +8,7 @@ src/wasm/mgs.js
 
 # assets for testing
 *.ply
+*.gs
 
 # macos
 *.DS_Store
