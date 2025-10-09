@@ -86,17 +86,22 @@ export class SplatPlayer extends HTMLElement
 		this.#loader.appendChild(this.#percentText);
 	}
 
-	async connectedCallback() 
+	connectedCallback() 
 	{
 		//handle window resize:
 		//---------------
-		let onResize = () => {
-			this.#canvas.width  = this.clientWidth  * CANVAS_RESOLUTION_SCALE;
-			this.#canvas.height = this.clientHeight * CANVAS_RESOLUTION_SCALE;
-		};
+		this.#resizeObserver = new ResizeObserver(entries => {
+			const entry = entries[0];
+			const width = entry.contentBoxSize[0].inlineSize * CANVAS_RESOLUTION_SCALE;
+			const height = entry.contentBoxSize[0].blockSize * CANVAS_RESOLUTION_SCALE;
 
-		onResize();
-		window.addEventListener('resize', onResize);
+			console.log('OBERSVER ASDF', width, height);
+
+			const canvas = entry.target;
+			canvas.width = width;
+			canvas.height = height;
+		});
+		this.#resizeObserver.observe(this.#canvas);
 
 		//create renderer + camera:
 		//---------------
@@ -221,6 +226,8 @@ export class SplatPlayer extends HTMLElement
 	#canvas = null;
 	#renderer = null;
 	#camera = null;
+	#resizeObserver = null;
+
 	#frames = [];
 	#framerate = 1.0;
 
