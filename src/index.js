@@ -6,19 +6,17 @@
 const CANVAS_RESOLUTION_SCALE = 2;
 
 //TEMP
-const GS_DIR = "easyvolcap_fashion";
-const GS_FRAME_COUNT = 30;
+const GS_DIR = "worldlabs";
+const GS_FRAME_COUNT = 1;
 const GS_FRAMERATE = 30.0;
-
-const CAMERA_SPEED = 0.1;
 
 //-------------------------//
 
 import MGSModule from './wasm/mgs.js'
 const MGS = await MGSModule();
 
-import { mat4, vec3 } from 'gl-matrix';
 import Renderer from './renderer.js'
+import { DefaultCamera, PortalCamera } from './camera.js';
 
 //-------------------------//
 
@@ -105,32 +103,12 @@ export class SplatPlayer extends HTMLElement
 		onResize();
 		window.addEventListener('resize', onResize);
 
-		//create renderer:
+		//create renderer + camera:
 		//---------------
 		this.#renderer = new Renderer(this.#canvas);
+		this.#camera = new PortalCamera();
 
-		//input handlers:
-		//---------------
-		window.addEventListener('keydown', (e) => { this.#keys[e.code] = true;  });
-		window.addEventListener('keyup',   (e) => { this.#keys[e.code] = false; });
-
-		this.#canvas.addEventListener('mousedown', (e) => {
-			this.#isDragging = true;
-			this.#lastMouse = [e.clientX, e.clientY];
-		});
-		window.addEventListener('mouseup', () => { this.#isDragging = false; });
-		window.addEventListener('mousemove', (e) => {
-			if(this.#isDragging) {
-				const dx = e.clientX - this.#lastMouse[0];
-				const dy = e.clientY - this.#lastMouse[1];
-				this.#lastMouse = [e.clientX, e.clientY];
-
-				const sensitivity = 0.0025;
-				this.#camYaw   += dx * sensitivity;
-				this.#camPitch += dy * sensitivity;
-				this.#camPitch = Math.max(-Math.PI/2+0.01, Math.min(Math.PI/2-0.01, this.#camPitch));
-			}
-		});
+		this.#camera.attachToCanvas(this.#canvas);
 
 		//load frames:
 		//---------------
@@ -146,12 +124,16 @@ export class SplatPlayer extends HTMLElement
 		});
 	}
 
+	//TODO: disconnectedCallback
+
+	//-------------------------//
+
 	async #loadAllFrames() 
 	{
 		let numLoaded = 0;
 
 		const promises = Array.from({ length: GS_FRAME_COUNT }, (_, i) => 
-			this.#loadFrame(i).then(frame => {
+			this.#loadPly(GS_DIR + `/${i}.ply`).then(frame => {
 				this.#frames[i] = frame;
 				
 				numLoaded++;
@@ -174,27 +156,20 @@ export class SplatPlayer extends HTMLElement
 
 	#canvas = null;
 	#renderer = null;
+	#camera = null;
 	#frames = [];
 
 	#lastRenderTime = null;
 	#videoTime = 0.0;
 	#curFrame = 0;
 
-	//TEMP: we need a proper camera system!
-	#camPos     = vec3.zero(vec3.create());
-	#camYaw   = 0.0;
-	#camPitch = 0.0;
-	#keys     = {};
-	#isDragging = false;
-	#lastMouse = [0, 0];
-
 	//-------------------------//
 
-	async #loadFrame(idx)
+	async #loadGS(path)
 	{
-		const fetchResponse = await fetch(GS_DIR + `/${idx}.gs`);
+		const fetchResponse = await fetch(path);
 		if(!fetchResponse.ok)
-			throw new Error("Failed to fetch .gs frame");
+			throw new Error("Failed to fetch .gs");
 
 		const gsBuf = await fetchResponse.arrayBuffer()
 
@@ -203,28 +178,15 @@ export class SplatPlayer extends HTMLElement
 		return group;
 	}
 
-	#updateCamera(dt)
+	async #loadPly(path)
 	{
-		const speed = dt * CAMERA_SPEED;
-		const forward = vec3.fromValues(
-			Math.cos(this.#camPitch) * Math.sin(this.#camYaw),
-			Math.sin(this.#camPitch),
-			Math.cos(this.#camPitch) * Math.cos(this.#camYaw)
-		);
-		const right = vec3.fromValues(
-			Math.sin(this.#camYaw - Math.PI/2),
-			0,
-			Math.cos(this.#camYaw - Math.PI/2)
-		);
+		const fetchResponse = await fetch(path);
+		if(!fetchResponse.ok)
+			throw new Error("Failed to fetch .ply");
 
-		if(this.#keys["KeyW"]) vec3.scaleAndAdd(this.#camPos, this.#camPos, forward, speed);
-		if(this.#keys["KeyS"]) vec3.scaleAndAdd(this.#camPos, this.#camPos, forward, -speed);
-		if(this.#keys["KeyA"]) vec3.scaleAndAdd(this.#camPos, this.#camPos, right, speed);
-		if(this.#keys["KeyD"]) vec3.scaleAndAdd(this.#camPos, this.#camPos, right, -speed);
-		if(this.#keys["Space"])     this.#camPos[1] -= speed;
-		if(this.#keys["ShiftLeft"]) this.#camPos[1] += speed;
+		const plyBuf = await fetchResponse.arrayBuffer()
+		return MGS.loadPly(plyBuf);
 	}
-
 
 	#mainLoop(timestamp)
 	{
@@ -248,23 +210,12 @@ export class SplatPlayer extends HTMLElement
 		//update camera:
 		//---------------
 		this.#lastRenderTime = timestamp;
-		this.#updateCamera(dt);
+		this.#camera.update(dt * 1000.0);
 
 		//create cam/proj matrices:
 		//---------------
-		const target = vec3.create();
-		target[0] = this.#camPos[0] + Math.cos(this.#camPitch) * Math.sin(this.#camYaw);
-		target[1] = this.#camPos[1] + Math.sin(this.#camPitch);
-		target[2] = this.#camPos[2] + Math.cos(this.#camPitch) * Math.cos(this.#camYaw);
-
-		const view = mat4.create();
-		this.lastView = view;
-		mat4.lookAt(view, this.#camPos, target, [0, -1, 0]);
-
-		const proj = mat4.create();
-		const fovY = Math.PI / 4;
-		const aspect = this.#canvas.width / this.#canvas.height;
-		mat4.perspective(proj, fovY, aspect, 0.01, 100);
+		const view = this.#camera.getViewMatrix(this.#canvas.width / this.#canvas.height);
+		const proj = this.#camera.getProjMatrix(this.#canvas.width / this.#canvas.height);
 
 		//render:
 		//---------------
