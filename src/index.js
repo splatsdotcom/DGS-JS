@@ -198,7 +198,7 @@ export class SplatPlayer extends HTMLElement
 
 	setCamera(type, options)
 	{
-		this.#camera.detatchFromCanvas();
+		this.#camera.detachFromCanvas();
 
 		if(type === 'default')
 			this.#camera = new DefaultCamera(options);
