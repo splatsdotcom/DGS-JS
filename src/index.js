@@ -95,8 +95,6 @@ export class SplatPlayer extends HTMLElement
 			const width = entry.contentBoxSize[0].inlineSize * CANVAS_RESOLUTION_SCALE;
 			const height = entry.contentBoxSize[0].blockSize * CANVAS_RESOLUTION_SCALE;
 
-			console.log('OBERSVER ASDF', width, height);
-
 			const canvas = entry.target;
 			canvas.width = width;
 			canvas.height = height;
