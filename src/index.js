@@ -101,7 +101,7 @@ export class SplatPlayer extends HTMLElement
 		//create renderer + camera:
 		//---------------
 		this.#renderer = new Renderer(this.#canvas);
-		this.#camera = new PortalCamera();
+		this.#camera = new DefaultCamera();
 
 		this.#camera.attachToCanvas(this.#canvas);
 
