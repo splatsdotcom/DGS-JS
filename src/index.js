@@ -5,11 +5,6 @@
 
 const CANVAS_RESOLUTION_SCALE = 2;
 
-//TEMP
-const GS_DIR = "worldlabs";
-const GS_FRAME_COUNT = 1;
-const GS_FRAMERATE = 30.0;
-
 //-------------------------//
 
 import MGSModule from './wasm/mgs.js'
@@ -44,7 +39,7 @@ export class SplatPlayer extends HTMLElement
 			top: '50%',
 			left: '50%',
 			transform: 'translate(-50%, -50%)',
-			display: 'flex',
+			display: 'none',
 			flexDirection: 'column',
 			alignItems: 'center',
 			gap: '8px',
@@ -110,12 +105,9 @@ export class SplatPlayer extends HTMLElement
 
 		this.#camera.attachToCanvas(this.#canvas);
 
-		//load frames:
+		//load empty gaussians:
 		//---------------
-		await this.#loadAllFrames();
-		this.#loader.style.display = 'none';
-
-		this.#renderer.setGaussians(this.#frames[0]);
+		this.#frames = [ new MGS.GaussianGroup() ];
 
 		//begin main loop:
 		//---------------
@@ -124,29 +116,101 @@ export class SplatPlayer extends HTMLElement
 		});
 	}
 
-	//TODO: disconnectedCallback
-
-	//-------------------------//
-
-	async #loadAllFrames() 
+	static get observedAttributes()
 	{
-		let numLoaded = 0;
-
-		const promises = Array.from({ length: GS_FRAME_COUNT }, (_, i) => 
-			this.#loadPly(GS_DIR + `/${i}.ply`).then(frame => {
-				this.#frames[i] = frame;
-				
-				numLoaded++;
-				const percent = Math.floor((numLoaded / GS_FRAME_COUNT) * 100);
-				this.#progress.style.width = `${percent}%`;
-				this.#percentText.textContent = `${percent}%`;
-
-				return frame;
-			})
-		);
-
-		await Promise.all(promises);
+		return [
+			'src-ply',
+			'src-gs', 
+			'camera'
+		];
 	}
+
+	attributeChangedCallback(name, oldValue, newValue)
+	{
+		if(oldValue == newValue)
+			return;
+
+		switch(name)
+		{
+		case 'src-ply':
+			this.setPLY(newValue);
+			break;
+		case 'src-gs':
+			this.setGS(newValue);
+			break;
+		case 'camera':
+		{
+			let type = 'default';
+			let params = {};
+			try 
+			{
+				params = JSON.parse(newValue);
+				type = params.type;
+			} 
+			catch (e) 
+			{
+				console.warn("Invalid JSON for 'camera' attribute, must be a JSON object containing a 'type' attribute");
+			}
+
+			this.setCamera(type, params);
+			break;
+		}
+		default:
+			break;
+		}
+	}
+
+	async setPLY(path)
+	{
+		this.#frames = [await this.#loadPLY(path)];
+		this.#framerate = 1.0;
+		this.#curFrame = -1;
+	}
+
+	async setGS(path)
+	{
+		this.#frames = [await this.#loadGS(path)];
+		this.#framerate = 1.0;
+		this.#curFrame = -1;
+	}
+
+	async setSequencePLY(dir, count, framerate)
+	{
+		//TODO
+		console.error('not implemented');
+	}
+
+	async setSequenceGS(dir, count, framerate)
+	{
+		this.#loader.style.display = 'flex';
+
+		this.#frames = Array(count);
+		this.#framerate = framerate;
+		this.#curFrame = -1;
+
+		await this.#loadSequenceGS(dir, count);
+
+		this.#loader.style.display = 'none';
+	}
+
+	setCamera(type, options)
+	{
+		this.#camera.detatchFromCanvas();
+
+		if(type === 'default')
+			this.#camera = new DefaultCamera(options);
+		else if(type === 'window')
+			this.#camera = new PortalCamera(options);
+		else
+		{
+			console.warn('Invalid camera provided, defaulting to \'default\'');
+			this.#camera = new DefaultCamera();
+		}
+
+		this.#camera.attachToCanvas(this.#canvas);
+	}
+
+	//TODO: disconnectedCallback
 
 	//-------------------------//
 
@@ -158,6 +222,7 @@ export class SplatPlayer extends HTMLElement
 	#renderer = null;
 	#camera = null;
 	#frames = [];
+	#framerate = 1.0;
 
 	#lastRenderTime = null;
 	#videoTime = 0.0;
@@ -178,7 +243,7 @@ export class SplatPlayer extends HTMLElement
 		return group;
 	}
 
-	async #loadPly(path)
+	async #loadPLY(path)
 	{
 		const fetchResponse = await fetch(path);
 		if(!fetchResponse.ok)
@@ -186,6 +251,26 @@ export class SplatPlayer extends HTMLElement
 
 		const plyBuf = await fetchResponse.arrayBuffer()
 		return MGS.loadPly(plyBuf);
+	}
+
+	async #loadSequenceGS(dir, count)
+	{
+		let numLoaded = 0;
+
+		const promises = Array.from({ length: count }, (_, i) => 
+			this.#loadGS(dir + `/${i}.gs`).then(frame => {
+				this.#frames[i] = frame;
+				
+				numLoaded++;
+				const percent = Math.floor((numLoaded / count) * 100);
+				this.#progress.style.width = `${percent}%`;
+				this.#percentText.textContent = `${percent}%`;
+
+				return frame;
+			})
+		);
+
+		await Promise.all(promises);
 	}
 
 	#mainLoop(timestamp)
@@ -199,7 +284,7 @@ export class SplatPlayer extends HTMLElement
 			dt = timestamp - this.#lastRenderTime;
 
 		this.#videoTime += dt;
-		let frame = Math.round(this.#videoTime * GS_FRAMERATE) % GS_FRAME_COUNT;
+		let frame = Math.round(this.#videoTime * this.#framerate) % this.#frames.length;
 
 		if(frame !== this.#curFrame)
 		{
