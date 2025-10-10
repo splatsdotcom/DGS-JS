@@ -177,17 +177,17 @@ export class SplatPlayer extends HTMLElement
 		this.#curFrame = -1;
 	}
 
-	async setSequencePLY(dir, count, framerate)
+	async setSequencePLY(urls, framerate)
 	{
 		//TODO
 		console.error('not implemented');
 	}
 
-	async setSequenceGS(dir, count, framerate)
+	async setSequenceGS(urls, framerate)
 	{
 		this.#loader.style.display = 'flex';
 
-		this.#frames = await this.#loadSequenceGS(dir, count);
+		this.#frames = await this.#loadSequenceGS(urls);
 		this.#framerate = framerate;
 		this.#curFrame = -1;
 
@@ -256,17 +256,17 @@ export class SplatPlayer extends HTMLElement
 		return MGS.loadPly(plyBuf);
 	}
 
-	async #loadSequenceGS(dir, count)
+	async #loadSequenceGS(urls)
 	{
 		let numLoaded = 0;
-		frames = new Array(count);
+		frames = new Array(urls.length);
 
-		const promises = Array.from({ length: count }, (_, i) => 
-			this.#loadGS(dir + `/${i}.gs`).then(frame => {
+		const promises = Array.from({ length: urls.length }, (_, i) => 
+			this.#loadGS(urls[i]).then(frame => {
 				frames[i] = frame;
 				
 				numLoaded++;
-				const percent = Math.floor((numLoaded / count) * 100);
+				const percent = Math.floor((numLoaded / urls.length) * 100);
 				this.#progress.style.width = `${percent}%`;
 				this.#percentText.textContent = `${percent}%`;
 
