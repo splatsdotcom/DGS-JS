@@ -289,7 +289,11 @@ export class SplatPlayer extends HTMLElement
 			dt = timestamp - this.#lastRenderTime;
 
 		this.#videoTime += dt;
-		let frame = Math.round(this.#videoTime * this.#framerate) % this.#frames.length;
+
+		let frameUnbounded = Math.round(this.#videoTime * this.#framerate);
+		let frame = frameUnbounded % this.#frames.length;
+		if(Math.floor(frameUnbounded / this.#frames.length) % 2 == 1)
+			frame = this.#frames.length - frame - 1; //boomerang
 
 		if(frame !== this.#curFrame)
 		{
