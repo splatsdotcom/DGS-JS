@@ -3,7 +3,7 @@
  * shader for performing the block prefix sums for radix sort
  */
 
-override WORKGROUP_SIZE: u32;
+const WORKGROUP_SIZE: u32 = 64u; // safari doesn't like if this is an override
 override CURRENT_BIT: u32;
 
 const ITEMS_PER_THREAD = 4u;

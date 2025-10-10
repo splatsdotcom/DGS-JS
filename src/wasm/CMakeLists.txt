@@ -19,8 +19,7 @@ add_executable(${PROJECT_NAME} ${mgs_src})
 # set emscripten flags:
 # -----------------
 set_target_properties(${PROJECT_NAME} PROPERTIES COMPILE_FLAGS 
-	"-pthread     \
-	-O3           \
+	"-O3           \
 	-flto         \
 	-msimd128     \
 	-msse2        \
@@ -34,11 +33,8 @@ set_target_properties(${PROJECT_NAME} PROPERTIES LINK_FLAGS
 	 -s EXPORT_ES6=1                                                      \
 	 -s EXPORT_NAME=MGS                                                   \
 	 -s EXPORTED_FUNCTIONS=\"['_malloc', '_free']\"                       \
-	 -s EXPORTED_RUNTIME_METHODS=\"['HEAPU8', 'FS', 'IDBFS', 'PThread']\" \
+	 -s EXPORTED_RUNTIME_METHODS=\"['HEAPU8', 'FS', 'IDBFS']\" \
 	 -s ALLOW_MEMORY_GROWTH                                               \
-	 -s PTHREAD_POOL_SIZE=\"navigator.hardwareConcurrency + 6\"           \
-	 -s PTHREAD_POOL_SIZE_STRICT=2                                        \
-	 -pthread                                                             \
 	 -O3                                                                  \
 	 -flto                                                                \
 	 -fexceptions                                                         \

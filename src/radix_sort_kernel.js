@@ -107,7 +107,7 @@ for(let bit = 0; bit < 32; bit += BITS_PER_PASS)
 			module: blockSumShaderModule,
 			entryPoint: 'radix_sort',
 			constants: {
-				'WORKGROUP_SIZE': WORKGROUP_SIZE,
+				// 'WORKGROUP_SIZE': WORKGROUP_SIZE,
 				'CURRENT_BIT': bit,
 			}
 		}
@@ -120,7 +120,7 @@ for(let bit = 0; bit < 32; bit += BITS_PER_PASS)
 			module: reorderShaderModule,
 			entryPoint: 'radix_sort_reorder',
 			constants: {
-				'WORKGROUP_SIZE': WORKGROUP_SIZE,
+				// 'WORKGROUP_SIZE': WORKGROUP_SIZE,
 				'CURRENT_BIT': bit,
 			}
 		}

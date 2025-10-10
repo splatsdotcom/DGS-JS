@@ -41,8 +41,8 @@ const scanPipeline = device.createComputePipeline({
 		module: shaderModule,
 		entryPoint: 'reduce_downsweep',
 		constants: {
-			'WORKGROUP_SIZE': WORKGROUP_SIZE,
-			'ITEMS_PER_WORKGROUP': ITEMS_PER_WORKGROUP,
+			// 'WORKGROUP_SIZE': WORKGROUP_SIZE,
+			// 'ITEMS_PER_WORKGROUP': ITEMS_PER_WORKGROUP,
 		}
 	}
 });
@@ -54,8 +54,8 @@ const blockSumPipeline = device.createComputePipeline({
 		module: shaderModule,
 		entryPoint: 'add_block_sums',
 		constants: {
-			'WORKGROUP_SIZE': WORKGROUP_SIZE,
-			'ITEMS_PER_WORKGROUP': ITEMS_PER_WORKGROUP,
+			// 'WORKGROUP_SIZE': WORKGROUP_SIZE,
+			// 'ITEMS_PER_WORKGROUP': ITEMS_PER_WORKGROUP,
 		}
 	}
 });

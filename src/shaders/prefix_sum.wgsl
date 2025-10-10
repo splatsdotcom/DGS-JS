@@ -6,8 +6,8 @@
  * TODO: figure out licensing
  */
 
-override WORKGROUP_SIZE: u32;
-override ITEMS_PER_WORKGROUP: u32;
+const WORKGROUP_SIZE: u32 = 256u; // safari doesn't like if these are overrides
+const ITEMS_PER_WORKGROUP: u32 = 2 * WORKGROUP_SIZE;
 
 //-------------------------//
 
