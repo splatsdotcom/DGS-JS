@@ -187,11 +187,9 @@ export class SplatPlayer extends HTMLElement
 	{
 		this.#loader.style.display = 'flex';
 
-		this.#frames = Array(count);
+		this.#frames = await this.#loadSequenceGS(dir, count);
 		this.#framerate = framerate;
 		this.#curFrame = -1;
-
-		await this.#loadSequenceGS(dir, count);
 
 		this.#loader.style.display = 'none';
 	}
@@ -261,10 +259,11 @@ export class SplatPlayer extends HTMLElement
 	async #loadSequenceGS(dir, count)
 	{
 		let numLoaded = 0;
+		frames = new Array(count);
 
 		const promises = Array.from({ length: count }, (_, i) => 
 			this.#loadGS(dir + `/${i}.gs`).then(frame => {
-				this.#frames[i] = frame;
+				frames[i] = frame;
 				
 				numLoaded++;
 				const percent = Math.floor((numLoaded / count) * 100);
@@ -276,6 +275,7 @@ export class SplatPlayer extends HTMLElement
 		);
 
 		await Promise.all(promises);
+		return frames;
 	}
 
 	#mainLoop(timestamp)
