@@ -227,6 +227,7 @@ export class DefaultCamera extends Camera
 		this.sens = options.sens || 0.003;
 		this.panSens = options.panSens || 0.0025;
 		this.scrollSens = options.scrollSens || 0.0025;
+		this.keyMoveSpeed = options.keyMoveSpeed || 0.02;
 
 		this.minRadius = options.minRadius || 0.5;
 		this.maxRadius = options.maxRadius || 3.0;
