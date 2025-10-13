@@ -6,7 +6,15 @@
 export const GPU_PROFILING = false; //NOTE: set to false before pushing!!!
 
 export const adapter = await navigator.gpu?.requestAdapter();
-export const device = await adapter?.requestDevice(GPU_PROFILING ? { requiredFeatures: ['timestamp-query'], requiredLimits: { maxStorageBufferBindingSize: 4294967292 } } : null);
+
+const limits = adapter?.limits;
+export const device = await adapter?.requestDevice({
+	requiredFeatures: GPU_PROFILING ? ['timestamp-query'] : [],
+	requiredLimits: {
+		maxBufferSize: limits?.maxBufferSize,
+		maxStorageBufferBindingSize: limits?.maxStorageBufferBindingSize,
+	},
+});
 
 device?.lost.then((info) => {
 	if(info.reason === 'destroyed') //we don't need to log an error if we destroyed the device ourselves
