@@ -583,7 +583,7 @@ export class SnapCamera extends Camera
 		const offPhi   = this.targetPhi   - this.basePhi;
 		const resistance = this.#angleResistanceFactor(offTheta, offPhi, this.resistance);
 
-		this.targetTheta -= deltaX * this.sens * resistance;
+		this.targetTheta += deltaX * this.sens * resistance;
 		this.targetPhi   -= deltaY * this.sens * resistance;
 
 		this.targetPhi = Math.max(this.targetPhi, -Math.PI / 2 + 0.01);
@@ -631,7 +631,7 @@ export class SnapCamera extends Camera
 			const offPhi   = this.targetPhi   - this.basePhi;
 			const resistance = this.#angleResistanceFactor(offTheta, offPhi, this.resistance);
 
-			this.targetTheta -= deltaX * this.sens * resistance;
+			this.targetTheta += deltaX * this.sens * resistance;
 			this.targetPhi   -= deltaY * this.sens * resistance;
 
 			this.targetPhi = Math.max(this.targetPhi, -Math.PI / 2 + 0.01);
