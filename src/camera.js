@@ -15,7 +15,6 @@ class Camera
 			throw new Error("Cannot instantiate abstract class Camera directly");
 		
 		this.keysPressed = new Set();
-		this.keyMoveSpeed = 0.02;
 
 		//default mouse tracking
 		this.mouseDown = false;
@@ -479,6 +478,279 @@ export class DefaultCamera extends Camera
 				moveSpeed
 			)
 		);
+	}
+}
+
+//-------------------------//
+
+export class SnapCamera extends Camera 
+{
+	constructor(options = {}) 
+	{
+		super();
+
+		this.fov = options.fov || 80.0;
+
+		this.baseTheta  = options.baseTheta  || Math.PI / 4;
+		this.basePhi    = options.basePhi    || Math.PI / 4;
+
+		this.targetTheta  = options.theta  || this.baseTheta;
+		this.targetPhi    = options.phi    || this.basePhi;
+		this.targetRadius = options.radius || 1.5;
+
+		this.theta  = this.targetTheta;
+		this.phi    = this.targetPhi;
+		this.radius = this.targetRadius;
+
+		this.minRadius = options.minRadius || 0.5;
+		this.maxRadius = options.maxRadius || 3.0;
+
+		this.targetX = options.targetX || 0.0;
+		this.targetY = options.targetY || 0.0;
+		this.targetZ = options.targetZ || 0.0;
+
+		this.sens = options.sens || 0.003;
+		this.scrollSens = options.scrollSens || 0.0025;
+
+		this.resistance = options.resistance || 0.25;
+		this.deadZone = options.deadZone || 0.1;
+		this.snapSmoothness = options.snapSmoothness || 0.9925;
+		this.valueSmoothness = options.valueSmoothness || 0.9925;
+		this.radiusSmoothness = options.radiusSmoothness || 0.99;
+
+		this.mouseX = options.mouseX || 0;
+		this.mouseY = options.mouseY || 0;
+		this.rotating = options.startRotating || false;
+
+		this.pinchStartDistance = 0;
+		this.canvas = null;
+	}
+
+	attachToCanvas(canvas) 
+	{
+		super.attachToCanvas(canvas);
+
+		this.canvas = canvas;
+	}
+
+	getViewMatrix() 
+	{
+		const cameraX = this.targetX + this.radius * Math.sin(this.theta) * Math.cos(this.phi);
+		const cameraY = this.targetY + this.radius * Math.sin(this.phi);
+		const cameraZ = this.targetZ + this.radius * Math.cos(this.theta) * Math.cos(this.phi);
+
+		return mat4.lookat(
+			vec3.create(cameraX, cameraY, cameraZ),
+			vec3.create(this.targetX, this.targetY, this.targetZ),
+			vec3.create(0.0, 1.0, 0.0)
+		);
+	}
+
+	onMouseDown(event) 
+	{
+		if(event.button !== 0) 
+			return;
+
+		this.rotating = true;
+		this.mouseX = event.clientX;
+		this.mouseY = event.clientY;
+
+		this.targetTheta  = this.theta;
+		this.targetPhi    = this.phi;
+		this.targetRadius = this.radius;
+	}
+
+	onMouseUp(event) 
+	{
+		if(event.button === 0)
+			this.rotating = false;
+	}
+
+	onMouseMove(event) 
+	{
+		if(!this.rotating) 
+		{
+			this.mouseX = event.clientX;
+			this.mouseY = event.clientY;
+			return;
+		}
+
+		const deltaX = event.clientX - this.mouseX;
+		const deltaY = event.clientY - this.mouseY;
+
+		const offTheta = this.targetTheta - this.baseTheta;
+		const offPhi   = this.targetPhi   - this.basePhi;
+		const resistance = this.#angleResistanceFactor(offTheta, offPhi, this.resistance);
+
+		this.targetTheta -= deltaX * this.sens * resistance;
+		this.targetPhi   += deltaY * this.sens * resistance;
+
+		this.targetPhi = Math.max(this.targetPhi, -Math.PI / 2 + 0.01);
+		this.targetPhi = Math.min(this.targetPhi,  Math.PI / 2 - 0.01);
+
+		this.mouseX = event.clientX;
+		this.mouseY = event.clientY;
+	}
+
+	onScroll(deltaY) 
+	{
+		this.targetRadius += deltaY * this.scrollSens;
+
+		this.targetRadius = Math.max(this.targetRadius, this.minRadius);
+		this.targetRadius = Math.min(this.targetRadius, this.maxRadius);
+	}
+
+	onTouchStart(event) 
+	{
+		if(event.touches.length === 1) 
+		{
+			const t = event.touches[0];
+			this.rotating = true;
+			this.mouseX = t.clientX;
+			this.mouseY = t.clientY;
+		} 
+		else if (event.touches.length === 2) 
+		{
+			this.rotating = false;
+			const t0 = event.touches[0];
+			const t1 = event.touches[1];
+			this.pinchStartDistance = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+		}
+	}
+
+	onTouchMove(event) 
+	{
+		if(event.touches.length === 1 && this.rotating) 
+		{
+			const t = event.touches[0];
+			const deltaX = t.clientX - this.mouseX;
+			const deltaY = t.clientY - this.mouseY;
+
+			const offTheta = this.targetTheta - this.baseTheta;
+			const offPhi   = this.targetPhi   - this.basePhi;
+			const resistance = this.#angleResistanceFactor(offTheta, offPhi, this.resistance);
+
+			this.targetTheta -= deltaX * this.sens * resistance;
+			this.targetPhi   += deltaY * this.sens * resistance;
+
+			this.targetPhi = Math.max(this.targetPhi, -Math.PI / 2 + 0.01);
+			this.targetPhi = Math.min(this.targetPhi,  Math.PI / 2 - 0.01);
+
+			this.mouseX = t.clientX;
+			this.mouseY = t.clientY;
+		}
+		else if(event.touches.length === 2) 
+		{
+			const t0 = event.touches[0];
+			const t1 = event.touches[1];
+			const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+			const deltaDist = this.pinchStartDistance - dist;
+			this.onScroll(deltaDist);
+			this.pinchStartDistance = dist;
+		}
+	}
+
+	onTouchEnd(event) 
+	{
+		if(event.touches.length === 0)
+			this.rotating = false;
+		else if (event.touches.length === 1) 
+		{
+			const t = event.touches[0];
+			this.mouseX = t.clientX;
+			this.mouseY = t.clientY;
+		}
+	}
+
+	update(deltaTime) 
+	{
+		super.update(deltaTime);
+
+		const snapDecay  = 1.0 - Math.pow(this.snapSmoothness,  deltaTime);
+		const valueDecay = 1.0 - Math.pow(this.valueSmoothness, deltaTime);
+
+		if(this.rotating) 
+		{
+			this.theta  = this.targetTheta;
+			this.phi    = this.targetPhi;
+			this.radius = this.targetRadius;
+		}
+		else 
+		{
+			const nearest = this.#closestPointDeadzone(
+				this.targetTheta, this.targetPhi,
+				this.baseTheta, this.basePhi,
+				this.deadZone
+			);
+
+			this.targetTheta += (nearest.theta - this.targetTheta) * snapDecay;
+			this.targetPhi   += (nearest.phi   - this.targetPhi)   * snapDecay;
+
+			this.theta  += (this.targetTheta  - this.theta)  * valueDecay;
+			this.phi    += (this.targetPhi    - this.phi)    * valueDecay;
+			this.radius += (this.targetRadius - this.radius) * (1.0 - Math.pow(this.radiusSmoothness, deltaTime));
+		}
+	}
+
+	#angleResistanceFactor(dTheta, dPhi, scale) 
+	{
+		const dist = Math.hypot(dTheta, dPhi);
+		const x = dist / (1.0 - scale);
+		return 1.0 / (1.0 + x * x);
+	}
+
+	#closestPointDeadzone(currentTheta, currentPhi, baseTheta, basePhi, deadZone) 
+	{
+		const dTheta = currentTheta - baseTheta;
+		const dPhi   = currentPhi   - basePhi;
+
+		const dist = Math.hypot(dTheta, dPhi);
+		if(dist <= deadZone) 
+			return { theta: currentTheta, phi: currentPhi };
+		else 
+		{
+			const scale = deadZone / dist;
+			return {
+				theta: baseTheta + dTheta * scale,
+				phi:   basePhi   + dPhi   * scale
+			};
+		}
+	}
+
+	getParams() 
+	{
+		return {
+			viewMat: this.getViewMatrix(),
+			fov: this.fov,
+
+			baseTheta: this.baseTheta,
+			basePhi: this.basePhi,
+
+			theta: this.theta,
+			phi: this.phi,
+			radius: this.radius,
+
+			minRadius: this.minRadius,
+			maxRadius: this.maxRadius,
+
+			targetX: this.targetX,
+			targetY: this.targetY,
+			targetZ: this.targetZ,
+			
+			sens: this.sens,
+			scrollSens: this.scrollSens,
+			
+			resistance: this.resistance,
+			deadZone: this.deadZone,
+			
+			snapSmoothness: this.snapSmoothness,
+			valueSmoothness: this.valueSmoothness,
+			radiusSmoothness: this.radiusSmoothness,
+
+			startRotating: this.mouseDown,
+			mouseX: this.mouseX,
+			mouseY: this.mouseY,
+		};
 	}
 }
 
