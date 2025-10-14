@@ -539,10 +539,11 @@ export class SnapCamera extends Camera
 		const cameraY = this.targetY + this.radius * Math.sin(this.phi);
 		const cameraZ = this.targetZ + this.radius * Math.cos(this.theta) * Math.cos(this.phi);
 
-		return mat4.lookat(
-			vec3.create(cameraX, cameraY, cameraZ),
-			vec3.create(this.targetX, this.targetY, this.targetZ),
-			vec3.create(0.0, 1.0, 0.0)
+		return mat4.lookAt(
+			mat4.create(),
+			vec3.fromValues(cameraX, cameraY, cameraZ),
+			vec3.fromValues(this.targetX, this.targetY, this.targetZ),
+			vec3.fromValues(0.0, 1.0, 0.0)
 		);
 	}
 
