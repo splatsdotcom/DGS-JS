@@ -11,7 +11,7 @@ import MGSModule from './wasm/mgs.js'
 const MGS = await MGSModule();
 
 import Renderer from './renderer.js'
-import { DefaultCamera, PortalCamera } from './camera.js';
+import { DefaultCamera, SnapCamera, PortalCamera } from './camera.js';
 
 //-------------------------//
 
@@ -167,6 +167,8 @@ export class SplatPlayer extends HTMLElement
 
 		if(type === 'default')
 			this.#camera = new DefaultCamera(options);
+		else if(type === 'snap')
+			this.#camera = new SnapCamera(options);
 		else if(type === 'window')
 			this.#camera = new PortalCamera(options);
 		else
