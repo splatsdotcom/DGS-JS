@@ -543,7 +543,7 @@ export class SnapCamera extends Camera
 			mat4.create(),
 			vec3.fromValues(cameraX, cameraY, cameraZ),
 			vec3.fromValues(this.targetX, this.targetY, this.targetZ),
-			vec3.fromValues(0.0, 1.0, 0.0)
+			vec3.fromValues(0.0, -1.0, 0.0)
 		);
 	}
 
