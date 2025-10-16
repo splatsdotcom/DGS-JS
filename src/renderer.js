@@ -393,7 +393,7 @@ class Renderer
 		const renderedGaussianSize = 12 * SIZEOF_FLOAT32;
 		const renderedGaussianHeaderSize = 8 * SIZEOF_UINT32;
 
-		const gaussianBuf = device.createBuffer({
+		const gaussianBuf = this.#maybeReuseBuf(this.#gaussianBufs?.gaussians, {
 			label: 'gaussians',
 
 			size: gaussians.buffer.byteLength,
@@ -401,21 +401,21 @@ class Renderer
 		});
 		device.queue.writeBuffer(gaussianBuf, 0, gaussians.buffer);
 
-		const renderedGaussianBuf = device.createBuffer({
+		const renderedGaussianBuf = this.#maybeReuseBuf(this.#gaussianBufs?.rendered, {
 			label: 'rendered gaussians',
 
 			size: renderedGaussianHeaderSize + gaussians.length * renderedGaussianSize,
 			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.INDIRECT
 		});
 
-		const gaussianDepthBuf = device.createBuffer({
+		const gaussianDepthBuf = this.#maybeReuseBuf(this.#gaussianBufs?.depths, {
 			label: 'gaussian depths',
 
 			size: gaussians.length * SIZEOF_UINT32,
 			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
 		});
 
-		const gaussianIndexBuf = device.createBuffer({
+		const gaussianIndexBuf = this.#maybeReuseBuf(this.#gaussianBufs?.indices, {
 			label: 'gaussian indices',
 
 			size: gaussians.length * SIZEOF_UINT32,
@@ -489,6 +489,14 @@ class Renderer
 			preprocess: preprocessGroup,
 			rasterize: rasterizeGroup
 		};
+	}
+
+	#maybeReuseBuf(oldBuf, options)
+	{
+		if(oldBuf == null || oldBuf.size < options.size)
+			return device.createBuffer(options);
+		else
+			return oldBuf;
 	}
 }
 
