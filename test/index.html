@@ -23,16 +23,16 @@
 
     let bufs = [];
     for(let i = 0; i < 30; i++)
-  {
-		const response = await fetch(`easyvolcap_fashion/${i}.gs`);
-		if(!response.ok)
-			throw new Error("Failed to fetch buffer at ");
+    {
+      const response = await fetch(`latest_test/${i}.gs`);
+      if(!response.ok)
+        throw new Error("Failed to fetch buffer at ");
 
-		bufs.push(await response.arrayBuffer());
-  }
+      bufs.push(await response.arrayBuffer());
+    }
 
   const player = document.querySelector('splat-player');
-  player.setSequenceGS(bufs, 30.0);
+  player.setSequenceGS(bufs, 25.0);
   </script>
 </body>
 </html>

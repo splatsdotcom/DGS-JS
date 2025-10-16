@@ -98,14 +98,24 @@ uint32_t GaussianGroup::get_sh_degree() const
 
 std::vector<uint8_t> GaussianGroup::serialize() const
 {
+	//compute size of each gaussian:
+	//-----------------	
+	uint32_t numShCoeffs = 3 * ((m_shDegree + 1) * (m_shDegree + 1) - 1);
+	uint64_t shCoeffsSize = sizeof(uint16_t) * numShCoeffs;
+	uint64_t gaussianSize = sizeof(GaussianPacked) - (sizeof(GaussianPacked::sh) - shCoeffsSize);
+
+	//compute total size, allocate mem:
+	//-----------------	
 	uint64_t totalSize = 0;
-	totalSize += sizeof(uint32_t);                            //num gaussians
-	totalSize += sizeof(uint32_t);                            //sh degree
-	totalSize += m_gaussians.size() * sizeof(GaussianPacked); //gaussians
+	totalSize += sizeof(uint32_t);                  //num gaussians
+	totalSize += sizeof(uint32_t);                  //sh degree
+	totalSize += m_gaussians.size() * gaussianSize; //gaussians
 
 	std::vector<uint8_t> serialized;
 	serialized.resize(totalSize);
 
+	//write metadata:
+	//-----------------	
 	uint32_t numGaussians = get_num_gaussians();
 	std::memcpy(
 		serialized.data(), &numGaussians, sizeof(uint32_t)
@@ -114,17 +124,27 @@ std::vector<uint8_t> GaussianGroup::serialize() const
 		serialized.data() + sizeof(uint32_t), &m_shDegree, sizeof(uint32_t)
 	);
 
-	std::memcpy(
-		serialized.data() + sizeof(uint32_t) + sizeof(uint32_t), 
-		m_gaussians.data(), 
-		m_gaussians.size() * sizeof(GaussianPacked)
-	);
+	//write gaussians:
+	//-----------------
+	uint64_t offset = sizeof(uint32_t) + sizeof(uint32_t);
+	
+	for(uint32_t i = 0; i < numGaussians; i++)
+	{
+		std::memcpy(
+			serialized.data() + offset, 
+			&m_gaussians[i], gaussianSize
+		);
+
+		offset += gaussianSize;
+	}
 
 	return serialized;
 }
 
 void GaussianGroup::deserialize(const std::vector<uint8_t>& serialized)
 {
+	//read metadata:
+	//-----------------	
 	if(serialized.size() < sizeof(uint32_t) + sizeof(uint32_t))
 		throw std::runtime_error("Serialized buffer is too small to contain metadata!");
 
@@ -139,16 +159,31 @@ void GaussianGroup::deserialize(const std::vector<uint8_t>& serialized)
 	if(m_shDegree > MGS_MAX_SH_DEGREE)
 		throw std::runtime_error("Serialized buffer contained an invalid SH degree!");
 
-	uint64_t gaussianSize = serialized.size() - sizeof(uint32_t) - sizeof(uint32_t);
-	if(gaussianSize != numGaussians * sizeof(GaussianPacked))
+	//compute size of each gaussian:
+	//-----------------	
+	uint32_t numShCoeffs = 3 * ((m_shDegree + 1) * (m_shDegree + 1) - 1);
+	uint64_t shCoeffsSize = sizeof(uint16_t) * numShCoeffs;
+	uint64_t gaussianSize = sizeof(GaussianPacked) - (sizeof(GaussianPacked::sh) - shCoeffsSize);
+
+	//read gaussians:
+	//-----------------
+	uint64_t serializedGaussiansSize = serialized.size() - sizeof(uint32_t) - sizeof(uint32_t);
+	if(serializedGaussiansSize != numGaussians * gaussianSize)
 		throw std::runtime_error("Serialized buffer was incorrectly sized");
 
 	m_gaussians.resize(numGaussians);
-	std::memcpy(
-		m_gaussians.data(), 
-		serialized.data() + sizeof(uint32_t) + sizeof(uint32_t), 
-		gaussianSize
-	);
+
+	uint64_t offset = sizeof(uint32_t) + sizeof(uint32_t);
+	for(uint32_t i = 0; i < numGaussians; i++)
+	{
+		std::memcpy(
+			&m_gaussians[i], 
+			serialized.data() + offset,
+			gaussianSize
+		);
+
+		offset += gaussianSize;
+	}
 }
 
 //-------------------------------------------//
