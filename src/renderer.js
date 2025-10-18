@@ -17,6 +17,7 @@ import RadixSortKernel from './radix_sort_kernel.js';
 
 import GAUSSIAN_PREPROCESS_SHADER_SRC from './shaders/gaussian_preprocess.wgsl?raw';
 import GAUSSIAN_RASTERIZE_SHADER_SRC  from './shaders/gaussian_rasterize.wgsl?raw';
+import COMPOSITE_SHADER_SRC from './shaders/composite.wgsl?raw';
 
 //-------------------------//
 
@@ -27,8 +28,10 @@ class Renderer
 		this.#canvas = canvas;
 
 		this.#context = this.#createContext();
+		this.#finalTex = this.#createFinalTex();
 		this.#preprocessPipeline = this.#createPreprocessPipeline();
 		this.#rasterizePipeline = this.#createRasterizePipeline();
+		this.#compositePipeline = this.#createCompositePipeline();
 		this.#geomBufs = this.#createGeometryBuffers();
 		this.#paramsBuf = this.#createParamsBuffer();
 
@@ -36,10 +39,20 @@ class Renderer
 			this.#profiler = this.#createProfiler();
 	}
 
+	resize()
+	{
+		this.#finalTex = this.#createFinalTex()
+	}
+
 	setGaussians(gaussians)
 	{
 		this.#gaussians = gaussians;
 		this.#gaussianBufs = this.#createGaussianBufs(this.#gaussians);
+	}
+
+	setBackgroundColor(color)
+	{
+		this.#backgroundColor = color;
 	}
 
 	draw(view, proj, timestamp)
@@ -136,7 +149,7 @@ class Renderer
 			label: 'main',
 
 			colorAttachments: [{
-				view: this.#context.getCurrentTexture().createView(),
+				view: this.#finalTex.view,
 				clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
 				loadOp: 'clear',
 				storeOp: 'store'
@@ -158,6 +171,23 @@ class Renderer
 		rasterPass.drawIndexedIndirect(this.#gaussianBufs.rendered, 0);
 
 		rasterPass.end();
+
+		//composite:
+		//---------------
+		const compositePass = encoder.beginRenderPass({
+			label: 'composite',
+			colorAttachments: [{
+				view: this.#context.getCurrentTexture().createView(),
+				clearValue: { r: this.#backgroundColor[0], g: this.#backgroundColor[1], b: this.#backgroundColor[2], a: 1.0 },
+				loadOp: 'clear',
+				storeOp: 'store'
+			}]
+		});
+
+		compositePass.setPipeline(this.#compositePipeline);
+		compositePass.setBindGroup(0, bindGroups.composite);
+		compositePass.draw(3);
+		compositePass.end();
 
 		//submit command buffer:
 		//---------------
@@ -214,9 +244,13 @@ class Renderer
 
 	#canvas = null;
 	#context = null;
+	#finalTex = null;
 	#preprocessPipeline = null;
 	#rasterizePipeline = null;
+	#compositePipeline = null;
 	#profiler = null;
+
+	#backgroundColor = [0.0, 0.0, 0.0];
 
 	#gaussians = null;
 	#gaussianBufs = null;
@@ -237,6 +271,28 @@ class Renderer
 		});
 
 		return context;
+	}
+
+	#createFinalTex()
+	{
+		const width = this.#canvas.width | 0;
+		const height = this.#canvas.height | 0;
+		if(width == 0 || height == 0) 
+			return;
+
+		const format = navigator.gpu.getPreferredCanvasFormat();
+
+		const tex = device.createTexture({
+			size: [width, height, 1],
+			format: format,
+			usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
+		});
+
+		return {
+			tex: tex,
+			view: tex.createView(),
+			sampler: device.createSampler({ magFilter: 'linear', minFilter: 'linear' })
+		}
 	}
 
 	#createPreprocessPipeline()
@@ -311,6 +367,32 @@ class Renderer
 		});
 
 		return pipeline;
+	}
+
+	#createCompositePipeline()
+	{
+		const shaderModule = device.createShaderModule({ 
+			label: 'composite',
+			code: COMPOSITE_SHADER_SRC
+		});
+
+		return device.createRenderPipeline({
+			label: 'composite',
+			layout: 'auto',
+			vertex: { module: shaderModule, entryPoint: 'vs' },
+			fragment: {
+				module: shaderModule,
+				entryPoint: 'fs',
+				targets: [{
+					format: navigator.gpu.getPreferredCanvasFormat(),
+					blend: {
+						color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+						alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' }
+					}
+				}]
+			},
+			primitive: { topology: 'triangle-list', cullMode: 'none' }
+		});
 	}
 
 	#createProfiler()
@@ -485,9 +567,18 @@ class Renderer
 			]
 		});
 
+		const compositeGroup = device.createBindGroup({
+			layout: this.#compositePipeline.getBindGroupLayout(0),
+			entries: [
+				{ binding: 0, resource: this.#finalTex.view },
+				{ binding: 1, resource: this.#finalTex.sampler }
+			]
+		});
+
 		return {
 			preprocess: preprocessGroup,
-			rasterize: rasterizeGroup
+			rasterize: rasterizeGroup,
+			composite: compositeGroup
 		};
 	}
 

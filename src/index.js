@@ -34,6 +34,13 @@ export class SplatPlayer extends HTMLElement
 
 	connectedCallback() 
 	{
+		//create renderer + camera:
+		//---------------
+		this.#renderer = new Renderer(this.#canvas);
+		this.#camera = new DefaultCamera();
+
+		this.#camera.attachToCanvas(this.#canvas);
+
 		//handle window resize:
 		//---------------
 		this.#resizeObserver = new ResizeObserver(entries => {
@@ -44,15 +51,10 @@ export class SplatPlayer extends HTMLElement
 			const canvas = entry.target;
 			canvas.width = width;
 			canvas.height = height;
+
+			this.#renderer.resize();
 		});
 		this.#resizeObserver.observe(this.#canvas);
-
-		//create renderer + camera:
-		//---------------
-		this.#renderer = new Renderer(this.#canvas);
-		this.#camera = new DefaultCamera();
-
-		this.#camera.attachToCanvas(this.#canvas);
 
 		//load empty gaussians:
 		//---------------
@@ -178,6 +180,11 @@ export class SplatPlayer extends HTMLElement
 		}
 
 		this.#camera.attachToCanvas(this.#canvas);
+	}
+
+	setBackgroundColor(color)
+	{
+		this.#renderer.setBackgroundColor(color);
 	}
 
 	//-------------------------//

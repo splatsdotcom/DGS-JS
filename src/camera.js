@@ -266,7 +266,7 @@ export class DefaultCamera extends Camera
 			mat4.create(),
 			cameraPos, 
 			this.pos, 
-			vec3.fromValues(0.0, -1.0, 0.0)
+			vec3.fromValues(0.0, 1.0, 0.0)
 		);
 	}
 
@@ -324,7 +324,7 @@ export class DefaultCamera extends Camera
 			const deltaX = event.clientX - this.mouseX;
 			const deltaY = event.clientY - this.mouseY;
 
-			this.targetTheta += deltaX * this.sens;
+			this.targetTheta -= deltaX * this.sens;
 			this.targetPhi -= deltaY * this.sens;
 
 			this.targetPhi = Math.max(this.targetPhi, -Math.PI / 2 + 0.01);
@@ -371,7 +371,7 @@ export class DefaultCamera extends Camera
 			const deltaY = touch.clientY - this.mouseY;
 			
 			this.targetTheta -= deltaX * this.sens;
-			this.targetPhi += deltaY * this.sens;
+			this.targetPhi -= deltaY * this.sens;
 
 			this.targetPhi = Math.max(this.targetPhi, -Math.PI / 2);
 			this.targetPhi = Math.min(this.targetPhi, Math.PI / 2);
@@ -456,13 +456,13 @@ export class DefaultCamera extends Camera
 		}
 		if(this.keysPressed.has('KeyA')) 
 		{
-			deltaX += rightX;
-			deltaZ += rightZ;
+			deltaX -= rightX;
+			deltaZ -= rightZ;
 		}
 		if(this.keysPressed.has('KeyD')) 
 		{
-			deltaX -= rightX;
-			deltaZ -= rightZ;
+			deltaX += rightX;
+			deltaZ += rightZ;
 		}
 		if(this.keysPressed.has('Space'))
 			deltaY -= 1.0;
@@ -543,7 +543,7 @@ export class SnapCamera extends Camera
 			mat4.create(),
 			vec3.fromValues(cameraX, cameraY, cameraZ),
 			vec3.fromValues(this.targetX, this.targetY, this.targetZ),
-			vec3.fromValues(0.0, -1.0, 0.0)
+			vec3.fromValues(0.0, 1.0, 0.0)
 		);
 	}
 
@@ -583,7 +583,7 @@ export class SnapCamera extends Camera
 		const offPhi   = this.targetPhi   - this.basePhi;
 		const resistance = this.#angleResistanceFactor(offTheta, offPhi, this.resistance);
 
-		this.targetTheta += deltaX * this.sens * resistance;
+		this.targetTheta -= deltaX * this.sens * resistance;
 		this.targetPhi   -= deltaY * this.sens * resistance;
 
 		this.targetPhi = Math.max(this.targetPhi, -Math.PI / 2 + 0.01);
@@ -631,7 +631,7 @@ export class SnapCamera extends Camera
 			const offPhi   = this.targetPhi   - this.basePhi;
 			const resistance = this.#angleResistanceFactor(offTheta, offPhi, this.resistance);
 
-			this.targetTheta += deltaX * this.sens * resistance;
+			this.targetTheta -= deltaX * this.sens * resistance;
 			this.targetPhi   -= deltaY * this.sens * resistance;
 
 			this.targetPhi = Math.max(this.targetPhi, -Math.PI / 2 + 0.01);
@@ -780,7 +780,7 @@ export class PortalCamera extends Camera
 				mat4.create(), 
 				this.screenPos, 
 				this.screenTarget, 
-				[0.0, -1.0, 0.0]
+				[0.0, 1.0, 0.0]
 			)
 		);
 	}
