@@ -34,9 +34,12 @@ GaussianPacked Gaussian::pack() const
 	};
 
 	GaussianPacked packed;
-	packed.covariance[0] = float32_pack_2x16(4.0f * sigma[0], 4.0f * sigma[1]);
-	packed.covariance[1] = float32_pack_2x16(4.0f * sigma[2], 4.0f * sigma[3]);
-	packed.covariance[2] = float32_pack_2x16(4.0f * sigma[4], 4.0f * sigma[5]);
+	packed.covariance1[0] = 4.0f * sigma[0];
+	packed.covariance1[1] = 4.0f * sigma[1];
+	packed.covariance1[2] = 4.0f * sigma[2];
+	packed.covariance2[0] = 4.0f * sigma[3];
+	packed.covariance2[1] = 4.0f * sigma[4];
+	packed.covariance2[2] = 4.0f * sigma[5];
 	packed.colorRG = float32_pack_2x16(color.r, color.g);
 	packed.colorBA = float32_pack_2x16(color.b, color.a);
 	packed.pos = pos;

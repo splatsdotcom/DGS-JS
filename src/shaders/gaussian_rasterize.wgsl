@@ -66,6 +66,7 @@ fn vs(@location(0) quadPos: vec2<f32>, @location(1) idx: u32) -> VertexOutput
 		g.center + (quadPos.x * g.major + quadPos.y * g.minor) / u_params.viewPort,
 		0.0, 1.0
 	);
+	out.pos.x *= -1; //TODO: why do we need to do this?
 
 	out.color = g.color;
 

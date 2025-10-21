@@ -47,10 +47,11 @@ struct Params
 
 struct Gaussian
 {
-	cov: vec3u,
+	cov1: vec3f,
 	colorRG: u32,
-	mean: vec3f,
+	cov2: vec3f,
 	colorBA: u32,
+	mean: vec3f,
 	sh: array<u32, (MAX_SH_COEFFS_REST + 1) / 2>
 };
 
@@ -150,14 +151,13 @@ fn preprocess(@builtin(global_invocation_id) GID: vec3u, @builtin(local_invocati
 
 	//unpack covariance matrix:
 	//---------------
-	let c0 = unpack2x16float(u_gaussians[idx].cov.x);
-	let c1 = unpack2x16float(u_gaussians[idx].cov.y);
-	let c2 = unpack2x16float(u_gaussians[idx].cov.z);
+	let c1 = u_gaussians[idx].cov1;
+	let c2 = u_gaussians[idx].cov2;
 
 	let cov = mat3x3f(
-		vec3f(c0.x, c0.y, c1.x),
-		vec3f(c0.y, c1.y, c2.x),
-		vec3f(c1.x, c2.x, c2.y)
+		vec3f(c1.x, c1.y, c1.z),
+		vec3f(c1.y, c2.x, c2.y),
+		vec3f(c1.z, c2.y, c2.z)
 	);
 
 	//project covariance matrix to 2D:
