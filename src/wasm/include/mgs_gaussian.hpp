@@ -56,10 +56,11 @@ class alignas(16) GaussianPacked
 public:
 	Gaussian unpack() const;
 
-	uint32_t covariance[3];
+	float covariance1[3];
 	uint32_t colorRG; 
-	vec3 pos;
+	float covariance2[3];
 	uint32_t colorBA;
+	vec3 pos;
 	std::array<uint32_t, (MGS_MAX_SH_COEFFS_REST + 1) / 2> sh; //2-bytes each, packed into uints
 };
 

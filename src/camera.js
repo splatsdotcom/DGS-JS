@@ -324,7 +324,7 @@ export class DefaultCamera extends Camera
 			const deltaX = event.clientX - this.mouseX;
 			const deltaY = event.clientY - this.mouseY;
 
-			this.targetTheta -= deltaX * this.sens;
+			this.targetTheta += deltaX * this.sens;
 			this.targetPhi -= deltaY * this.sens;
 
 			this.targetPhi = Math.max(this.targetPhi, -Math.PI / 2 + 0.01);
@@ -370,7 +370,7 @@ export class DefaultCamera extends Camera
 			const deltaX = touch.clientX - this.mouseX;
 			const deltaY = touch.clientY - this.mouseY;
 			
-			this.targetTheta -= deltaX * this.sens;
+			this.targetTheta += deltaX * this.sens;
 			this.targetPhi -= deltaY * this.sens;
 
 			this.targetPhi = Math.max(this.targetPhi, -Math.PI / 2);
@@ -583,7 +583,7 @@ export class SnapCamera extends Camera
 		const offPhi   = this.targetPhi   - this.basePhi;
 		const resistance = this.#angleResistanceFactor(offTheta, offPhi, this.resistance);
 
-		this.targetTheta -= deltaX * this.sens * resistance;
+		this.targetTheta += deltaX * this.sens * resistance;
 		this.targetPhi   -= deltaY * this.sens * resistance;
 
 		this.targetPhi = Math.max(this.targetPhi, -Math.PI / 2 + 0.01);
@@ -631,7 +631,7 @@ export class SnapCamera extends Camera
 			const offPhi   = this.targetPhi   - this.basePhi;
 			const resistance = this.#angleResistanceFactor(offTheta, offPhi, this.resistance);
 
-			this.targetTheta -= deltaX * this.sens * resistance;
+			this.targetTheta += deltaX * this.sens * resistance;
 			this.targetPhi   -= deltaY * this.sens * resistance;
 
 			this.targetPhi = Math.max(this.targetPhi, -Math.PI / 2 + 0.01);
