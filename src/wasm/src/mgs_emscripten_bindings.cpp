@@ -10,27 +10,70 @@
 
 EMSCRIPTEN_BINDINGS(libmgs_js)
 {
-	emscripten::class_<mgs::GaussianGroup>("GaussianGroup")
-		.smart_ptr<std::shared_ptr<mgs::GaussianGroup>>("GaussianGroup")
+	emscripten::class_<mgs::GaussiansPacked>("Gaussians")
+		.smart_ptr<std::shared_ptr<mgs::GaussiansPacked>>("Gaussians")
 
 		.constructor(emscripten::optional_override([]()
 		{
-			return std::make_shared<mgs::GaussianGroup>();
+			return std::make_shared<mgs::GaussiansPacked>(mgs::Gaussians());
 		}))
 
-    	.property("length", &mgs::GaussianGroup::get_num_gaussians)
+		.constructor(emscripten::optional_override([](const emscripten::val& arg)
+		{
+			emscripten::val bufView = emscripten::val::global("Uint8Array").new_(arg);
+			std::vector<uint8_t> data = emscripten::convertJSArrayToNumberVector<uint8_t>(bufView);
 
-    	.property("shDegree", &mgs::GaussianGroup::get_sh_degree)
+			return std::make_shared<mgs::GaussiansPacked>(data);
+		}))
 
-		.property("buffer", emscripten::optional_override([](const mgs::GaussianGroup& self)
+    	.property("length", &mgs::GaussiansPacked::count)
+    	.property("shDegree", &mgs::GaussiansPacked::shDegree)
+    	.property("colorMin", &mgs::GaussiansPacked::colorMin)
+    	.property("colorMax", &mgs::GaussiansPacked::colorMax)
+    	.property("shMin", &mgs::GaussiansPacked::shMin)
+    	.property("shMax", &mgs::GaussiansPacked::shMax)
+
+		.property("means", emscripten::optional_override([](const mgs::GaussiansPacked& self)
 		{
 			return emscripten::val(emscripten::typed_memory_view(
-				self.get_num_gaussians() * sizeof(mgs::GaussianPacked), 
-				(const uint8_t*)self.get_gaussians().data()
+				self.means.size() * sizeof(vec4), 
+				(const uint8_t*)self.means.data()
 			));
 		}))
 
-		.function("serialize", emscripten::optional_override([](const mgs::GaussianGroup& self) 
+		.property("covariances", emscripten::optional_override([](const mgs::GaussiansPacked& self)
+		{
+			return emscripten::val(emscripten::typed_memory_view(
+				self.covariances.size() * sizeof(float), 
+				(const uint8_t*)self.covariances.data()
+			));
+		}))
+
+		.property("opacities", emscripten::optional_override([](const mgs::GaussiansPacked& self)
+		{
+			return emscripten::val(emscripten::typed_memory_view(
+				self.opacities.size() * sizeof(uint8_t), 
+				(const uint8_t*)self.opacities.data()
+			));
+		}))
+
+		.property("colors", emscripten::optional_override([](const mgs::GaussiansPacked& self)
+		{
+			return emscripten::val(emscripten::typed_memory_view(
+				self.colors.size() * sizeof(uint16_t), 
+				(const uint8_t*)self.colors.data()
+			));
+		}))
+
+		.property("shs", emscripten::optional_override([](const mgs::GaussiansPacked& self)
+		{
+			return emscripten::val(emscripten::typed_memory_view(
+				self.shs.size() * sizeof(uint8_t), 
+				(const uint8_t*)self.shs.data()
+			));
+		}))
+
+		.function("serialize", emscripten::optional_override([](const mgs::GaussiansPacked& self) 
 		{
 			std::vector<uint8_t> data = self.serialize();
 			emscripten::val u8array = emscripten::val::global("Uint8Array").new_(data.size());
@@ -40,14 +83,6 @@ EMSCRIPTEN_BINDINGS(libmgs_js)
 
 			u8array.call<void>("set", memoryView);
 			return u8array;
-		}))
-
-		.function("deserialize", emscripten::optional_override([](mgs::GaussianGroup& self, const emscripten::val& arg) 
-		{
-			emscripten::val bufView = emscripten::val::global("Uint8Array").new_(arg);
-			std::vector<uint8_t> data = emscripten::convertJSArrayToNumberVector<uint8_t>(bufView);
-
-			self.deserialize(data);
 		}));
 
 	emscripten::function("loadPly", emscripten::optional_override([](const emscripten::val& arg)
@@ -55,6 +90,6 @@ EMSCRIPTEN_BINDINGS(libmgs_js)
 		emscripten::val bufView = emscripten::val::global("Uint8Array").new_(arg);
 		std::vector<uint8_t> data = emscripten::convertJSArrayToNumberVector<std::uint8_t>(bufView);
 
-		return std::make_shared<mgs::GaussianGroup>(mgs::ply::load(data));
+		return std::make_shared<mgs::GaussiansPacked>(mgs::ply::load(data));
 	}));
 }

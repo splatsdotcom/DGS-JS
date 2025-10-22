@@ -456,13 +456,13 @@ export class DefaultCamera extends Camera
 		}
 		if(this.keysPressed.has('KeyA')) 
 		{
-			deltaX -= rightX;
-			deltaZ -= rightZ;
+			deltaX += rightX;
+			deltaZ += rightZ;
 		}
 		if(this.keysPressed.has('KeyD')) 
 		{
-			deltaX += rightX;
-			deltaZ += rightZ;
+			deltaX -= rightX;
+			deltaZ -= rightZ;
 		}
 		if(this.keysPressed.has('Space'))
 			deltaY -= 1.0;
