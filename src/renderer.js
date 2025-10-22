@@ -461,6 +461,8 @@ class Renderer
 		size += 1 * SIZEOF_UINT32;      // sh degree
 		size += 2 * SIZEOF_FLOAT32;     // focal lengths
 		size += 2 * SIZEOF_FLOAT32;     // viewport
+		size += 2 * SIZEOF_FLOAT32;     // min/max color
+		size += 2 * SIZEOF_FLOAT32;     // min/max sh
 
 		return device.createBuffer({
 			label: 'params',
@@ -475,13 +477,45 @@ class Renderer
 		const renderedGaussianSize = 12 * SIZEOF_FLOAT32;
 		const renderedGaussianHeaderSize = 8 * SIZEOF_UINT32;
 
-		const gaussianBuf = this.#maybeReuseBuf(this.#gaussianBufs?.gaussians, {
-			label: 'gaussians',
+		const meansBuf = this.#maybeReuseBuf(this.#gaussianBufs?.means, {
+			label: 'means',
 
-			size: gaussians.buffer.byteLength,
+			size: gaussians.means.byteLength,
 			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
 		});
-		device.queue.writeBuffer(gaussianBuf, 0, gaussians.buffer);
+		device.queue.writeBuffer(meansBuf, 0, gaussians.means);
+
+		const covsBuf = this.#maybeReuseBuf(this.#gaussianBufs?.covariances, {
+			label: 'covariances',
+
+			size: gaussians.covariances.byteLength,
+			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+		});
+		device.queue.writeBuffer(covsBuf, 0, gaussians.covariances);
+
+		const opacitiesBuf = this.#maybeReuseBuf(this.#gaussianBufs?.opacities, {
+			label: 'opacities',
+
+			size: gaussians.opacities.byteLength,
+			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+		});
+		device.queue.writeBuffer(opacitiesBuf, 0, gaussians.opacities);
+
+		const colorsBuf = this.#maybeReuseBuf(this.#gaussianBufs?.colors, {
+			label: 'colors',
+
+			size: gaussians.colors.byteLength,
+			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+		});
+		device.queue.writeBuffer(colorsBuf, 0, gaussians.colors);
+
+		const shsBuf = this.#maybeReuseBuf(this.#gaussianBufs?.shs, {
+			label: 'spherical harmomics',
+
+			size: Math.max(gaussians.shs.byteLength, 4),
+			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+		});
+		device.queue.writeBuffer(shsBuf, 0, gaussians.shs);
 
 		const renderedGaussianBuf = this.#maybeReuseBuf(this.#gaussianBufs?.rendered, {
 			label: 'rendered gaussians',
@@ -505,7 +539,12 @@ class Renderer
 		});
 
 		return {
-			gaussians: gaussianBuf,
+			means: meansBuf,
+			covariances: covsBuf,
+			opacities: opacitiesBuf,
+			colors: colorsBuf,
+			shs: shsBuf,
+
 			rendered: renderedGaussianBuf,
 			depths: gaussianDepthBuf,
 			indices: gaussianIndexBuf
@@ -538,6 +577,12 @@ class Renderer
 		fData.set(viewPort, offset);
 		offset += 2;
 
+		fData.set([this.#gaussians.colorMin, this.#gaussians.colorMax], offset);
+		offset += 2;
+
+		fData.set([this.#gaussians.shMin, this.#gaussians.shMax], offset);
+		offset += 2;
+
 		device.queue.writeBuffer(this.#paramsBuf, 0, data);
 	}
 
@@ -549,11 +594,16 @@ class Renderer
 			layout: this.#preprocessPipeline.getBindGroupLayout(0),
 			entries: [
 				{ binding: 0, resource: { buffer: this.#paramsBuf } },
-				{ binding: 1, resource: { buffer: this.#gaussianBufs.gaussians } },
 
-				{ binding: 2, resource: { buffer: this.#gaussianBufs.rendered } },
-				{ binding: 3, resource: { buffer: this.#gaussianBufs.depths } },
-				{ binding: 4, resource: { buffer: this.#gaussianBufs.indices } }
+				{ binding: 1, resource: { buffer: this.#gaussianBufs.means } },
+				{ binding: 2, resource: { buffer: this.#gaussianBufs.covariances } },
+				{ binding: 3, resource: { buffer: this.#gaussianBufs.opacities } },
+				{ binding: 4, resource: { buffer: this.#gaussianBufs.colors } },
+				{ binding: 5, resource: { buffer: this.#gaussianBufs.shs } },
+
+				{ binding: 6, resource: { buffer: this.#gaussianBufs.rendered } },
+				{ binding: 7, resource: { buffer: this.#gaussianBufs.depths } },
+				{ binding: 8, resource: { buffer: this.#gaussianBufs.indices } }
 			]
 		});
 

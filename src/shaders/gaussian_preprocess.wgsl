@@ -42,17 +42,12 @@ struct Params
 	shDegree: u32,
 
 	focalLengths: vec2f,
-	viewPort: vec2f
-};
+	viewPort: vec2f,
 
-struct Gaussian
-{
-	cov1: vec3f,
-	colorRG: u32,
-	cov2: vec3f,
-	colorBA: u32,
-	mean: vec3f,
-	sh: array<u32, (MAX_SH_COEFFS_REST + 1) / 2>
+	colorMin: f32,
+	colorMax: f32,
+	shMin: f32,
+	shMax: f32
 };
 
 struct RenderedGaussian
@@ -80,11 +75,16 @@ struct RenderedGaussians
 //-------------------------//
 
 @group(0) @binding(0) var<uniform> u_params: Params;
-@group(0) @binding(1) var<storage, read> u_gaussians: array<Gaussian>;
 
-@group(0) @binding(2) var<storage, read_write> u_renderedGaussians: RenderedGaussians;
-@group(0) @binding(3) var<storage, read_write> u_gaussianDepths: array<u32>;
-@group(0) @binding(4) var<storage, read_write> u_gaussianIndices: array<u32>;
+@group(0) @binding(1) var<storage, read> u_means      : array<vec3f>;
+@group(0) @binding(2) var<storage, read> u_covariances: array<f32>;
+@group(0) @binding(3) var<storage, read> u_opacities  : array<u32>;
+@group(0) @binding(4) var<storage, read> u_colors     : array<u32>;
+@group(0) @binding(5) var<storage, read> u_shs        : array<u32>;
+
+@group(0) @binding(6) var<storage, read_write> u_renderedGaussians: RenderedGaussians;
+@group(0) @binding(7) var<storage, read_write> u_gaussianDepths: array<u32>;
+@group(0) @binding(8) var<storage, read_write> u_gaussianIndices: array<u32>;
 
 var<workgroup> s_numGaussians: atomic<u32>;
 var<workgroup> s_writePosWorkgroup: u32;
@@ -114,13 +114,16 @@ fn f16_to_u32_ordered(x: f32) -> u32
 
 fn get_sh_coeffs(gaussianIdx: u32, i: u32) -> vec3f
 {
-	let idx = (i - 1) * 3u; //dc coeff is stored separately
+	let numCoeffs = (u_params.shDegree + 1) * (u_params.shDegree + 1) - 1;
+	let idx = (gaussianIdx * numCoeffs + i - 1) * 3;
 
-	return vec3f(
-		unpack2x16float(u_gaussians[gaussianIdx].sh[(idx + 0) / 2])[(idx + 0) % 2],
-		unpack2x16float(u_gaussians[gaussianIdx].sh[(idx + 1) / 2])[(idx + 1) % 2],
-		unpack2x16float(u_gaussians[gaussianIdx].sh[(idx + 2) / 2])[(idx + 2) % 2]
+	let shRead = vec3u(
+		(u_shs[(idx + 0) / 4] >> (((idx + 0) % 4) * 8)) & 0xFF,
+		(u_shs[(idx + 1) / 4] >> (((idx + 1) % 4) * 8)) & 0xFF,
+		(u_shs[(idx + 2) / 4] >> (((idx + 2) % 4) * 8)) & 0xFF
 	);
+
+	return (vec3f(shRead) / 0xFF) * (u_params.shMax - u_params.shMin) + u_params.shMin;
 }
 
 @compute @workgroup_size(WORKGROUP_SIZE) 
@@ -131,13 +134,14 @@ fn preprocess(@builtin(global_invocation_id) GID: vec3u, @builtin(local_invocati
 	//find clip pos of mean:
 	//---------------
 	var idx = GID.x;
-	if(idx >= arrayLength(&u_gaussians))
+	if(idx >= arrayLength(&u_means))
 	{
 		culled = true;
-		idx = arrayLength(&u_gaussians) - 1;
+		idx = arrayLength(&u_means) - 1;
 	}
 
-	let camPos = u_params.view * vec4f(u_gaussians[idx].mean, 1.0);
+	let mean = u_means[idx];
+	let camPos = u_params.view * vec4f(mean, 1.0);
 	let clipPos = u_params.proj * camPos;
 
 	//cull if outside of camera view:
@@ -151,13 +155,17 @@ fn preprocess(@builtin(global_invocation_id) GID: vec3u, @builtin(local_invocati
 
 	//unpack covariance matrix:
 	//---------------
-	let c1 = u_gaussians[idx].cov1;
-	let c2 = u_gaussians[idx].cov2;
+	let c0 = u_covariances[idx * 6 + 0];
+	let c1 = u_covariances[idx * 6 + 1];
+	let c2 = u_covariances[idx * 6 + 2];
+	let c3 = u_covariances[idx * 6 + 3];
+	let c4 = u_covariances[idx * 6 + 4];
+	let c5 = u_covariances[idx * 6 + 5];
 
 	let cov = mat3x3f(
-		vec3f(c1.x, c1.y, c1.z),
-		vec3f(c1.y, c2.x, c2.y),
-		vec3f(c1.z, c2.y, c2.z)
+		vec3f(c0, c1, c2),
+		vec3f(c1, c3, c4),
+		vec3f(c2, c4, c5)
 	);
 
 	//project covariance matrix to 2D:
@@ -198,14 +206,16 @@ fn preprocess(@builtin(global_invocation_id) GID: vec3u, @builtin(local_invocati
 
 	//evalate sh:
 	//---------------
-	let dc = vec4f(
-		unpack2x16float(u_gaussians[idx].colorRG),
-		unpack2x16float(u_gaussians[idx].colorBA)
+	let dcRead = vec3u(
+		(u_colors[(idx * 3 + 0) / 2] >> (((idx * 3 + 0) % 2) * 16)) & 0xFFFF,
+		(u_colors[(idx * 3 + 1) / 2] >> (((idx * 3 + 1) % 2) * 16)) & 0xFFFF,
+		(u_colors[(idx * 3 + 2) / 2] >> (((idx * 3 + 2) % 2) * 16)) & 0xFFFF
 	);
 
-	let dir = normalize(u_gaussians[idx].mean - u_params.camPos);
+	let dc = (vec3f(dcRead) / f32(0xFFFF)) * (u_params.colorMax - u_params.colorMin) + u_params.colorMin;
+	let dir = normalize(mean - u_params.camPos);
 
-	var color = SH_C0 * dc.rgb;
+	var color = SH_C0 * dc;
 	if(u_params.shDegree > 0)
 	{
 		let x = dir.x;
@@ -245,7 +255,8 @@ fn preprocess(@builtin(global_invocation_id) GID: vec3u, @builtin(local_invocati
 
 	color += 0.5;
 
-	let rgba = clamp(clipPos.z / clipPos.w + 1.0, 0.0, 1.0) * vec4f(color, dc.a);
+	let opacityRead = (u_opacities[idx / 4] >> ((idx % 4) * 8)) & 0xFF;
+	let rgba = clamp(clipPos.z / clipPos.w + 1.0, 0.0, 1.0) * vec4f(color, f32(opacityRead) / 0xFF);
 
 	//determine write position within global buffer:
 	//---------------

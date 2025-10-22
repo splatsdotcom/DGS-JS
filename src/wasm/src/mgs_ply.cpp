@@ -56,12 +56,12 @@ static inline T ply_read(PlyType type, const uint8_t* buf);
 
 //-------------------------------------------//
 
-GaussianGroup load(const std::vector<uint8_t>& buf)
+GaussiansPacked load(const std::vector<uint8_t>& buf)
 {
 	return load(static_cast<uint64_t>(buf.size()), buf.data());
 }
 
-GaussianGroup load(uint64_t size, const uint8_t* buf)
+GaussiansPacked load(uint64_t size, const uint8_t* buf)
 {
 	//validate:
 	//-----------------	
@@ -119,7 +119,7 @@ GaussianGroup load(uint64_t size, const uint8_t* buf)
 	}
 
 	if(vertexCount == 0)
-		return GaussianGroup(std::vector<GaussianPacked>());
+		return GaussiansPacked(Gaussians());
 
 	//prefetch property offsets + types:
 	//-----------------	
@@ -223,8 +223,7 @@ GaussianGroup load(uint64_t size, const uint8_t* buf)
 		return ply_read<float>(p->type, row + p->offset);
 	};
 
-	std::vector<GaussianPacked> gaussians;
-	gaussians.reserve(vertexCount);
+	Gaussians gaussians(degree);
 
 	for(uint64_t i = 0; i < vertexCount; i++) 
 	{
@@ -264,7 +263,7 @@ GaussianGroup load(uint64_t size, const uint8_t* buf)
 		if(hasOpacity)
 			color.w = 1.0f / (1.0f + std::exp(-readProp(acc.opacity, row)));
 
-		std::array<vec3, MGS_MAX_SH_COEFFS_REST> sh{};
+		std::vector<vec3> sh(restTriplets);
 		for(uint32_t j=0;j<restTriplets;j++) 
 		{
 			const auto& trip = acc.rest[j];
@@ -276,11 +275,12 @@ GaussianGroup load(uint64_t size, const uint8_t* buf)
 			);
 		}
 
-		Gaussian g(pos,scale,rot,color,sh);
-		gaussians.push_back(g.pack());
+		gaussians.add(
+			pos, scale, rot, color.w, color.xyz(), sh
+		);
 	}
 
-	return GaussianGroup(gaussians, degree);
+	return GaussiansPacked(gaussians);
 }
 
 //-------------------------------------------//

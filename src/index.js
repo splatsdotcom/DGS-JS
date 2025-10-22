@@ -58,7 +58,7 @@ export class SplatPlayer extends HTMLElement
 
 		//load empty gaussians:
 		//---------------
-		this.#frames = [ new MGS.GaussianGroup() ];
+		this.#frames = [ new MGS.Gaussians() ];
 
 		//begin main loop:
 		//---------------
@@ -130,10 +130,7 @@ export class SplatPlayer extends HTMLElement
 
 	setGS(buf)
 	{
-		const group = new MGS.GaussianGroup();
-		group.deserialize(buf);
-
-		this.#frames = [ group ];
+		this.#frames = [ new MGS.Gaussians(buf) ];
 		this.#framerate = 1.0;
 		this.#curFrame = -1;
 	}
@@ -153,12 +150,7 @@ export class SplatPlayer extends HTMLElement
 		if(framerate === undefined)
 			throw new Error('Must providea a framerate to setSequenceGS');
 
-		this.#frames = bufs.map((b) => {
-			const group = new MGS.GaussianGroup();
-			group.deserialize(b);
-			return group;
-		});
-
+		this.#frames = bufs.map(b => new MGS.Gaussians(b));
 		this.#framerate = framerate;
 		this.#curFrame = -1;
 	}

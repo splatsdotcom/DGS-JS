@@ -17,8 +17,8 @@ namespace ply
 
 //-------------------------------------------//
 
-GaussianGroup load(const std::vector<uint8_t>& buf);
-GaussianGroup load(uint64_t size, const uint8_t* buf);
+GaussiansPacked load(const std::vector<uint8_t>& buf);
+GaussiansPacked load(uint64_t size, const uint8_t* buf);
 
 }; //namespace ply
 }; //namespace mgs

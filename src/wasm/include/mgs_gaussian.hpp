@@ -18,73 +18,57 @@
 #include "quickmath.hpp"
 using namespace qm;
 
-#define MGS_MAX_SH_DEGREE 3U
-#define MGS_MAX_SH_COEFFS (3 * (MGS_MAX_SH_DEGREE + 1) * (MGS_MAX_SH_DEGREE + 1))
-#define MGS_MAX_SH_COEFFS_REST (MGS_MAX_SH_COEFFS - 3) //not including dc coeffs
+#define MGS_MAX_SH_DEGREE 3
 
 namespace mgs
 {
 
 //-------------------------------------------//
 
-class Gaussian;
-class GaussianPacked;
-
 /**
- * all parameters describing a 3D gaussian with spherical harmonics, uncompressed
+ * a list of gaussians
  */
-class Gaussian
+struct Gaussians
 {
-public:
-	Gaussian(const vec3& pos, const vec3& scale, const quaternion& orient, const vec4& color, const std::array<vec3, MGS_MAX_SH_COEFFS_REST>& sh);
+	uint32_t shDegree = 0;
+	uint32_t count = 0;
 
-	GaussianPacked pack() const;
+	std::vector<vec3> means;
+	std::vector<vec3> scales;
+	std::vector<quaternion> rotations;
+	std::vector<float> opacities;
+	std::vector<vec3> colors;
+	std::vector<vec3> shs;
 
-	vec3 pos;
-	vec3 scale;
-	quaternion orient;
+	Gaussians(uint32_t shDegree = 0);
 
-	vec4 color;
-	std::array<vec3, MGS_MAX_SH_COEFFS_REST> sh;
+	void add(const vec3& mean, const vec3& scale, const quaternion& rotation, 
+	         float opacity, const vec3& color, const std::vector<vec3>& sh);
 };
 
 /**
- * all parameters describing a 3D gaussian with spherical harmonics, compressed for rendering
+ * a list of gaussians, packed and processed
  */
-class alignas(16) GaussianPacked
+struct GaussiansPacked
 {
-public:
-	Gaussian unpack() const;
+	uint32_t shDegree = 0;
+	uint32_t count = 0;
 
-	float covariance1[3];
-	uint32_t colorRG; 
-	float covariance2[3];
-	uint32_t colorBA;
-	vec3 pos;
-	std::array<uint32_t, (MGS_MAX_SH_COEFFS_REST + 1) / 2> sh; //2-bytes each, packed into uints
-};
+	float colorMax = -0.5f;
+	float colorMin =  0.5f;
+	float shMax    = -0.5f;
+	float shMin    =  0.5f;
 
-/**
- * a group of gaussians
- */
-class GaussianGroup
-{
-public:
-	GaussianGroup() = default;
-	GaussianGroup(const std::vector<GaussianPacked>& gaussians, uint32_t shDegree = 0);
-	GaussianGroup(const std::vector<Gaussian>& gaussians, uint32_t shDegree = 0);
+	std::vector<vec4> means;        // stored as vec4 to respect GPU alignment rules, TODO fix this
+	std::vector<float> covariances;
+	std::vector<uint8_t> opacities; // unorm8  [0.0, 1.0]
+	std::vector<uint16_t> colors;   // unorm16 [colorMin, colorMax]
+	std::vector<uint8_t> shs;       // unorm8  [shMin, shMax]
 
-	uint32_t get_num_gaussians() const;
-	const std::vector<GaussianPacked>& get_gaussians() const;
-
-	uint32_t get_sh_degree() const;
+	GaussiansPacked(const Gaussians& gaussians);
+	GaussiansPacked(const std::vector<uint8_t>& serialized);
 
 	std::vector<uint8_t> serialize() const;
-	void deserialize(const std::vector<uint8_t>& serialized);
-
-private:
-	std::vector<GaussianPacked> m_gaussians;
-	uint32_t m_shDegree;
 };
 
 }; //namespace mgs

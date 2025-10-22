@@ -8,230 +8,201 @@
 namespace mgs
 {
 
-static inline float float32_from_bits(uint32_t bits);
-static inline uint32_t float32_to_bits(float f);
-static inline uint16_t float32_to_float16(float f);
-static inline uint32_t float32_pack_2x16(float f1, float f2);
+//-------------------------------------------//
+
+static inline uint32_t align(uint32_t a, uint32_t b)
+{
+	return (a + b - 1) & ~(b - 1);
+}
 
 //-------------------------------------------//
 
-Gaussian::Gaussian(const vec3& _pos, const vec3& _scale, const quaternion& _orient, const vec4& _color, const std::array<vec3, MGS_MAX_SH_COEFFS_REST>& _sh) :
-	pos(_pos), scale(_scale), orient(_orient), color(_color), sh(_sh)
+Gaussians::Gaussians(uint32_t _shDegree) : 
+	shDegree(_shDegree)
 {
-
+	if(_shDegree > MGS_MAX_SH_DEGREE)
+		throw std::invalid_argument("spherical haromics degree is too large");
 }
 
-GaussianPacked Gaussian::pack() const
+void Gaussians::add(const vec3& mean, const vec3& scale, const quaternion& rotation, 
+                    float opacity, const vec3& color, const std::vector<vec3>& sh)
 {
-	mat4 M = qm::scale(scale) * quaternion_to_mat4(orient);
-	float sigma[6] = {
-		M[0][0] * M[0][0] + M[0][1] * M[0][1] + M[0][2] * M[0][2],
-		M[0][0] * M[1][0] + M[0][1] * M[1][1] + M[0][2] * M[1][2],
-		M[0][0] * M[2][0] + M[0][1] * M[2][1] + M[0][2] * M[2][2],
-		M[1][0] * M[1][0] + M[1][1] * M[1][1] + M[1][2] * M[1][2],
-		M[1][0] * M[2][0] + M[1][1] * M[2][1] + M[1][2] * M[2][2],
-		M[2][0] * M[2][0] + M[2][1] * M[2][1] + M[2][2] * M[2][2]
+	if(sh.size() != (shDegree + 1) * (shDegree + 1) - 1)
+		throw std::invalid_argument("incorrect number of spherical haromics provided");
+
+	means.push_back(mean);
+	scales.push_back(scale);
+	rotations.push_back(rotation);
+	opacities.push_back(opacity);
+	colors.push_back(color);
+	for(uint32_t i = 0; i < sh.size(); i++)
+		shs.push_back(sh[i]);
+
+	count++;
+}
+
+GaussiansPacked::GaussiansPacked(const Gaussians& gaussians) :
+	shDegree(gaussians.shDegree), count(gaussians.count)
+{
+	uint32_t numShCoeff = (shDegree + 1) * (shDegree + 1) - 1;
+	
+	//compute min and max for color/sh:
+	//-----------------	
+	colorMin =  INFINITY;
+	colorMax = -INFINITY;
+	shMin =  INFINITY;
+	shMax = -INFINITY;
+
+	for(uint32_t i = 0; i < count; i++)
+	{
+		colorMin = std::min(colorMin, gaussians.colors[i].r);
+		colorMin = std::min(colorMin, gaussians.colors[i].g);
+		colorMin = std::min(colorMin, gaussians.colors[i].b);
+
+		colorMax = std::max(colorMax, gaussians.colors[i].r);
+		colorMax = std::max(colorMax, gaussians.colors[i].g);
+		colorMax = std::max(colorMax, gaussians.colors[i].b);
+
+		for(uint32_t j = 0; j < numShCoeff; j++)
+		{
+			shMin = std::min(shMin, gaussians.shs[i * numShCoeff + j].r);
+			shMin = std::min(shMin, gaussians.shs[i * numShCoeff + j].g);
+			shMin = std::min(shMin, gaussians.shs[i * numShCoeff + j].b);
+
+			shMax = std::max(shMax, gaussians.shs[i * numShCoeff + j].r);
+			shMax = std::max(shMax, gaussians.shs[i * numShCoeff + j].g);
+			shMax = std::max(shMax, gaussians.shs[i * numShCoeff + j].b);
+		}
+	}
+
+	//pack each gaussian:
+	//-----------------
+	float colorScale = 1.0f / (colorMax - colorMin);
+	float shScale = 1.0f / (shMax - shMin);
+
+	means.resize(count);
+	covariances.resize(count * 6);
+	opacities.resize(align(count, 4));
+	colors.resize(align(count * 3, 2));
+	shs.resize(align(count * numShCoeff * 3, 4));
+	
+	for(uint32_t i = 0; i < count; i++)
+	{
+		//mean:
+		means[i] = vec4(gaussians.means[i], 0.0f);
+
+		//covariance
+		mat4 M = qm::scale(gaussians.scales[i]) * quaternion_to_mat4(gaussians.rotations[i]);
+		float covariance[6] = {
+			M[0][0] * M[0][0] + M[0][1] * M[0][1] + M[0][2] * M[0][2],
+			M[0][0] * M[1][0] + M[0][1] * M[1][1] + M[0][2] * M[1][2],
+			M[0][0] * M[2][0] + M[0][1] * M[2][1] + M[0][2] * M[2][2],
+			M[1][0] * M[1][0] + M[1][1] * M[1][1] + M[1][2] * M[1][2],
+			M[1][0] * M[2][0] + M[1][1] * M[2][1] + M[1][2] * M[2][2],
+			M[2][0] * M[2][0] + M[2][1] * M[2][1] + M[2][2] * M[2][2]
+		};
+
+		for(uint32_t j = 0; j < 6; j++)
+			covariances[i * 6 + j] = 4.0f * covariance[j];
+
+		//opacity
+		opacities[i] = (uint8_t)(gaussians.opacities[i] * UINT8_MAX);
+
+		//color
+		colors[i * 3 + 0] = (uint16_t)((gaussians.colors[i].r - colorMin) * colorScale * UINT16_MAX);
+		colors[i * 3 + 1] = (uint16_t)((gaussians.colors[i].g - colorMin) * colorScale * UINT16_MAX);
+		colors[i * 3 + 2] = (uint16_t)((gaussians.colors[i].b - colorMin) * colorScale * UINT16_MAX);
+
+		//sh
+		for(uint32_t j = 0; j < numShCoeff; j++)
+		{
+			uint32_t idx = (i * numShCoeff + j) * 3;
+			shs[idx + 0] = (uint8_t)((gaussians.shs[i * numShCoeff + j].r - shMin) * shScale * UINT8_MAX);
+			shs[idx + 1] = (uint8_t)((gaussians.shs[i * numShCoeff + j].g - shMin) * shScale * UINT8_MAX);
+			shs[idx + 2] = (uint8_t)((gaussians.shs[i * numShCoeff + j].b - shMin) * shScale * UINT8_MAX);
+		}
+	}
+}
+
+GaussiansPacked::GaussiansPacked(const std::vector<uint8_t>& serialized)
+{
+	const uint8_t* ptr = serialized.data();
+	size_t remaining = serialized.size();
+
+	auto read = [&](void* dst, size_t size) {
+		if(remaining < size) 
+			throw std::runtime_error("GaussiansPacked: truncated input");
+
+		std::memcpy(dst, ptr, size);
+		ptr += size;
+		remaining -= size;
 	};
 
-	GaussianPacked packed;
-	packed.covariance1[0] = 4.0f * sigma[0];
-	packed.covariance1[1] = 4.0f * sigma[1];
-	packed.covariance1[2] = 4.0f * sigma[2];
-	packed.covariance2[0] = 4.0f * sigma[3];
-	packed.covariance2[1] = 4.0f * sigma[4];
-	packed.covariance2[2] = 4.0f * sigma[5];
-	packed.colorRG = float32_pack_2x16(color.r, color.g);
-	packed.colorBA = float32_pack_2x16(color.b, color.a);
-	packed.pos = pos;
-
-	for(uint32_t i = 0; i < MGS_MAX_SH_COEFFS_REST; i += 2)
-	{
-		uint32_t idx1 = i + 0;
-		uint32_t idx2 = i + 1;
-
-		float f1 = sh[std::min(idx1 / 3, MGS_MAX_SH_COEFFS_REST - 1)].v[idx1 % 3];
-		float f2 = sh[std::min(idx2 / 3, MGS_MAX_SH_COEFFS_REST - 1)].v[idx2 % 3];
-
-		packed.sh[i / 2] = float32_pack_2x16(f1, f2);
-	}
-
-	return packed;
-}
-
-Gaussian GaussianPacked::unpack() const
-{
-	//TODO!
-	return Gaussian(
-		vec3(0.0f), 
-		vec3(0.01f), 
-		quaternion_identity(), 
-		vec4(0.0f),
-		std::array<vec3, MGS_MAX_SH_COEFFS_REST>()
-	);
-}
-
-GaussianGroup::GaussianGroup(const std::vector<GaussianPacked>& gaussians, uint32_t shDegree) :
-	m_gaussians(gaussians), m_shDegree(shDegree)
-{
-
-}
-
-GaussianGroup::GaussianGroup(const std::vector<Gaussian>& gaussians, uint32_t shDegree) :
-	m_shDegree(shDegree)
-{
-	m_gaussians.reserve(gaussians.size());
-	for(uint32_t i = 0; i < gaussians.size(); i++)
-		m_gaussians.push_back(gaussians[i].pack());
-}
-
-uint32_t GaussianGroup::get_num_gaussians() const
-{
-	return static_cast<uint32_t>(m_gaussians.size());
-}
-
-const std::vector<GaussianPacked>& GaussianGroup::get_gaussians() const
-{
-	return m_gaussians;
-}
-
-uint32_t GaussianGroup::get_sh_degree() const
-{
-	return m_shDegree;
-}
-
-std::vector<uint8_t> GaussianGroup::serialize() const
-{
-	//compute size of each gaussian:
-	//-----------------	
-	uint32_t numShCoeffs = 3 * ((m_shDegree + 1) * (m_shDegree + 1) - 1);
-	uint64_t shCoeffsSize = sizeof(uint16_t) * numShCoeffs;
-	uint64_t gaussianSize = sizeof(GaussianPacked) - (sizeof(GaussianPacked::sh) - shCoeffsSize);
-
-	//compute total size, allocate mem:
-	//-----------------	
-	uint64_t totalSize = 0;
-	totalSize += sizeof(uint32_t);                  //num gaussians
-	totalSize += sizeof(uint32_t);                  //sh degree
-	totalSize += m_gaussians.size() * gaussianSize; //gaussians
-
-	std::vector<uint8_t> serialized;
-	serialized.resize(totalSize);
-
-	//write metadata:
-	//-----------------	
-	uint32_t numGaussians = get_num_gaussians();
-	std::memcpy(
-		serialized.data(), &numGaussians, sizeof(uint32_t)
-	);
-	std::memcpy(
-		serialized.data() + sizeof(uint32_t), &m_shDegree, sizeof(uint32_t)
-	);
-
-	//write gaussians:
+	//read header:
 	//-----------------
-	uint64_t offset = sizeof(uint32_t) + sizeof(uint32_t);
+	read(&shDegree, sizeof(uint32_t));
+	read(&count, sizeof(uint32_t));
+	read(&colorMax, sizeof(float));
+	read(&colorMin, sizeof(float));
+	read(&shMax, sizeof(float));
+	read(&shMin, sizeof(float));
+
+	uint32_t numShCoeff = (shDegree + 1) * (shDegree + 1) - 1;
 	
-	for(uint32_t i = 0; i < numGaussians; i++)
-	{
-		std::memcpy(
-			serialized.data() + offset, 
-			&m_gaussians[i], gaussianSize
-		);
-
-		offset += gaussianSize;
-	}
-
-	return serialized;
-}
-
-void GaussianGroup::deserialize(const std::vector<uint8_t>& serialized)
-{
-	//read metadata:
-	//-----------------	
-	if(serialized.size() < sizeof(uint32_t) + sizeof(uint32_t))
-		throw std::runtime_error("Serialized buffer is too small to contain metadata!");
-
-	uint32_t numGaussians;
-	std::memcpy(
-		&numGaussians, serialized.data(), sizeof(uint32_t)
-	);
-	std::memcpy(
-		&m_shDegree, serialized.data() + sizeof(uint32_t), sizeof(uint32_t)
-	);
-
-	if(m_shDegree > MGS_MAX_SH_DEGREE)
-		throw std::runtime_error("Serialized buffer contained an invalid SH degree!");
-
-	//compute size of each gaussian:
-	//-----------------	
-	uint32_t numShCoeffs = 3 * ((m_shDegree + 1) * (m_shDegree + 1) - 1);
-	uint64_t shCoeffsSize = sizeof(uint16_t) * numShCoeffs;
-	uint64_t gaussianSize = sizeof(GaussianPacked) - (sizeof(GaussianPacked::sh) - shCoeffsSize);
-
-	//read gaussians:
+	//read data:
 	//-----------------
-	uint64_t serializedGaussiansSize = serialized.size() - sizeof(uint32_t) - sizeof(uint32_t);
-	if(serializedGaussiansSize != numGaussians * gaussianSize)
-		throw std::runtime_error("Serialized buffer was incorrectly sized");
+	auto read_vector = [&](auto& v, size_t numElems) {
+		using T = typename std::remove_reference<decltype(v[0])>::type;
+		v.resize(numElems);
+		size_t bytes = numElems * sizeof(T);
+		read(v.data(), bytes);
+	};
 
-	m_gaussians.resize(numGaussians);
+	read_vector(means, count);
+	read_vector(covariances, count * 6);
+	read_vector(opacities, align(count, 4));
+	read_vector(colors, align(count * 3, 2));
+	read_vector(shs, align(count * numShCoeff * 3, 4));
 
-	uint64_t offset = sizeof(uint32_t) + sizeof(uint32_t);
-	for(uint32_t i = 0; i < numGaussians; i++)
-	{
-		std::memcpy(
-			&m_gaussians[i], 
-			serialized.data() + offset,
-			gaussianSize
-		);
-
-		offset += gaussianSize;
-	}
+	//validate:
+	//-----------------
+	if(remaining != 0)
+		throw std::runtime_error("GaussiansPacked: extra bytes at end of input");
 }
 
-//-------------------------------------------//
-
-static inline float float32_from_bits(uint32_t bits)
+std::vector<uint8_t> GaussiansPacked::serialize() const
 {
-	return *(float*)&bits;
-}
+	std::vector<uint8_t> data;
 
-static inline uint32_t float32_to_bits(float f)
-{
-	return *(uint32_t*)&f;
-}
+	//write header:
+	//-----------------
+	auto append = [&](const void* src, size_t size) {
+		size_t offset = data.size();
+		data.resize(offset + size);
+		std::memcpy(data.data() + offset, src, size);
+	};
 
-//from https://github.com/lifa08/float16_from_float32
-static inline uint16_t float32_to_float16(float f)
-{
-#if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901L) || defined(__GNUC__) && !defined(__STRICT_ANSI__)
-	const float scaleToInf = 0x1.0p+112f;
-	const float scaleToZero = 0x1.0p-110f;
-#else
-	const float scaleToInf = float32_from_bits(0x77800000U);
-	const float scaleToZero = float32_from_bits(0x08800000U);
-#endif
-	float base = (fabsf(f) * scaleToInf) * scaleToZero;
+	append(&shDegree, sizeof(shDegree));
+	append(&count, sizeof(count));
+	append(&colorMax, sizeof(colorMax));
+	append(&colorMin, sizeof(colorMin));
+	append(&shMax, sizeof(shMax));
+	append(&shMin, sizeof(shMin));
 
-	const uint32_t w = float32_to_bits(f);
-	const uint32_t lshiftW = w + w;
-	const uint32_t sign = w & 0x80000000U;
-	uint32_t bias = lshiftW & 0xFF000000U;
-	if(bias < 0x71000000U)
-		bias = 0x71000000U;
+	//write data:
+	//-----------------
+	auto append_vector = [&](auto const& v) {
+		if(!v.empty())
+			append(v.data(), v.size() * sizeof(v[0]));
+	};
 
-	base = float32_from_bits((bias >> 1) + 0x07800000U) + base;
-	const uint32_t bits = float32_to_bits(base);
+	append_vector(means);
+	append_vector(covariances);
+	append_vector(opacities);
+	append_vector(colors);
+	append_vector(shs);
 
-	const uint32_t expBits = (bits >> 13) & 0x00007C00U;
-	const uint32_t mantissaBits = bits & 0x00000FFFU;
-	const uint32_t nonSign = expBits + mantissaBits;
-	return (sign >> 16) | (lshiftW > 0xFF000000U ? 0x7E00 : nonSign);
-}
-
-static inline uint32_t float32_pack_2x16(float f1, float f2)
-{
-	return (float32_to_float16(f2) << 16U) | float32_to_float16(f1);
+	return data;
 }
 
 }; //namespace mgs
