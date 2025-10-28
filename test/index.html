@@ -24,7 +24,7 @@
     let bufs = [];
     for(let i = 0; i < 2; i++)
     {
-      const response = await fetch(`fashion_diff/${i}.ply`);
+      const response = await fetch(`fashion_diff_gs/${i}.gs`);
       if(!response.ok)
         throw new Error("Failed to fetch buffer at ");
 
@@ -33,7 +33,12 @@
 
   const player = document.querySelector('splat-player');
   // player.setBackgroundColor([1.0,1.0,1.])
-  player.setSequencePLY(bufs, 10.0 / 25.0);
+  player.setSequenceGS(bufs, 11.0 / 25.0);
+  player.setCamera('default', {
+    keyMoveSpeed: 0.005,
+    minRadius: 0.01,
+    maxRadius: 1.0
+  })
   </script>
 </body>
 </html>
