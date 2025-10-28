@@ -138,6 +138,9 @@ GaussiansPacked load(uint64_t size, const uint8_t* buf)
 		const PlyProp *rot[4];
 		const PlyProp *color[3];
 		const PlyProp *opacity;
+		const PlyProp *velocity[3];
+		const PlyProp *tMean;
+		const PlyProp *tStdev;
 
 		std::vector<std::array<const PlyProp*, 3>> rest;
 	};
@@ -148,10 +151,12 @@ GaussiansPacked load(uint64_t size, const uint8_t* buf)
 	acc.y = &findProp("y");
 	acc.z = &findProp("z");
 
-	bool hasScale   = properties.count("scale_0") && properties.count("scale_1") && properties.count("scale_2");
-	bool hasOrient  = properties.count("rot_0")   && properties.count("rot_1")   && properties.count("rot_2")   && properties.count("rot_3");
-	bool hasColor   = properties.count("f_dc_0")  && properties.count("f_dc_1")  && properties.count("f_dc_2");
-	bool hasOpacity = properties.count("opacity");
+	bool hasScale    = properties.count("scale_0")    && properties.count("scale_1")    && properties.count("scale_2");
+	bool hasOrient   = properties.count("rot_0")      && properties.count("rot_1")      && properties.count("rot_2")   && properties.count("rot_3");
+	bool hasColor    = properties.count("f_dc_0")     && properties.count("f_dc_1")     && properties.count("f_dc_2");
+	bool hasOpacity  = properties.count("opacity");
+	bool hasVelocity = properties.count("velocity_x") && properties.count("velocity_y") && properties.count("velocity_z");
+	bool hasDynamic  = properties.count("t_mean")     && properties.count("t_stdev");
 
 	if(hasScale) 
 	{
@@ -177,6 +182,19 @@ GaussiansPacked load(uint64_t size, const uint8_t* buf)
 
 	if(hasOpacity) 
 		acc.opacity = &findProp("opacity");
+
+	if(hasVelocity)
+	{
+		acc.velocity[0] = &findProp("velocity_x");
+		acc.velocity[1] = &findProp("velocity_y");
+		acc.velocity[2] = &findProp("velocity_z");
+	}
+
+	if(hasDynamic)
+	{
+		acc.tMean = &findProp("t_mean");
+		acc.tStdev = &findProp("t_stdev");
+	}
 
 	//get SH properties:
 	//-----------------	
@@ -223,16 +241,21 @@ GaussiansPacked load(uint64_t size, const uint8_t* buf)
 		return ply_read<float>(p->type, row + p->offset);
 	};
 
-	Gaussians gaussians(degree);
+	Gaussians gaussians(degree, hasDynamic);
 
 	for(uint64_t i = 0; i < vertexCount; i++) 
 	{
 		const uint8_t* row = dataStart + i * rowStride;
 
 		vec3 pos = { readProp(acc.x, row), readProp(acc.y, row), readProp(acc.z, row) };
+
 		vec3 scale(0.01f);
 		quaternion rot = quaternion_identity();
 		vec4 color(1.0f);
+
+		vec3 velocity(0.0f);
+		float tMean = 0.0f;
+		float tStdev = 0.0f;
 
 		if(hasScale) 
 		{
@@ -263,6 +286,19 @@ GaussiansPacked load(uint64_t size, const uint8_t* buf)
 		if(hasOpacity)
 			color.w = 1.0f / (1.0f + std::exp(-readProp(acc.opacity, row)));
 
+		if(hasVelocity)
+		{
+			velocity.x = readProp(acc.velocity[0], row);
+			velocity.y = readProp(acc.velocity[1], row);
+			velocity.z = readProp(acc.velocity[2], row);
+		}
+
+		if(hasDynamic)
+		{
+			tMean = readProp(acc.tMean, row);
+			tStdev = std::log(1.0f + std::exp(readProp(acc.tStdev, row)));
+		}
+
 		std::vector<vec3> sh(restTriplets);
 		for(uint32_t j=0;j<restTriplets;j++) 
 		{
@@ -276,7 +312,8 @@ GaussiansPacked load(uint64_t size, const uint8_t* buf)
 		}
 
 		gaussians.add(
-			pos, scale, rot, color.w, color.xyz(), sh
+			pos, scale, rot, color.w, color.xyz(), sh,
+			velocity, tMean, tStdev
 		);
 	}
 

@@ -47,7 +47,10 @@ struct Params
 	colorMin: f32,
 	colorMax: f32,
 	shMin: f32,
-	shMax: f32
+	shMax: f32,
+
+	dynamic: u32,
+	time: f32
 };
 
 struct RenderedGaussian
@@ -76,15 +79,16 @@ struct RenderedGaussians
 
 @group(0) @binding(0) var<uniform> u_params: Params;
 
-@group(0) @binding(1) var<storage, read> u_means      : array<vec3f>;
+@group(0) @binding(1) var<storage, read> u_means      : array<vec4f>;
 @group(0) @binding(2) var<storage, read> u_covariances: array<f32>;
 @group(0) @binding(3) var<storage, read> u_opacities  : array<u32>;
 @group(0) @binding(4) var<storage, read> u_colors     : array<u32>;
 @group(0) @binding(5) var<storage, read> u_shs        : array<u32>;
+@group(0) @binding(6) var<storage, read> u_velocities : array<vec4f>;
 
-@group(0) @binding(6) var<storage, read_write> u_renderedGaussians: RenderedGaussians;
-@group(0) @binding(7) var<storage, read_write> u_gaussianDepths: array<u32>;
-@group(0) @binding(8) var<storage, read_write> u_gaussianIndices: array<u32>;
+@group(0) @binding(7) var<storage, read_write> u_renderedGaussians: RenderedGaussians;
+@group(0) @binding(8) var<storage, read_write> u_gaussianDepths: array<u32>;
+@group(0) @binding(9) var<storage, read_write> u_gaussianIndices: array<u32>;
 
 var<workgroup> s_numGaussians: atomic<u32>;
 var<workgroup> s_writePosWorkgroup: u32;
@@ -140,8 +144,15 @@ fn preprocess(@builtin(global_invocation_id) GID: vec3u, @builtin(local_invocati
 		idx = arrayLength(&u_means) - 1;
 	}
 
-	let mean = u_means[idx];
-	let camPos = u_params.view * vec4f(mean, 1.0);
+	var mean = u_means[idx];
+	var velocity = vec4f(0.0);
+	if(u_params.dynamic != 0)
+	{
+		velocity = u_velocities[idx];
+		mean = vec4f(mean.xyz + velocity.xyz * u_params.time, mean.w);
+	}
+
+	let camPos = u_params.view * vec4f(mean.xyz, 1.0);
 	let clipPos = u_params.proj * camPos;
 
 	//cull if outside of camera view:
@@ -213,7 +224,7 @@ fn preprocess(@builtin(global_invocation_id) GID: vec3u, @builtin(local_invocati
 	);
 
 	let dc = (vec3f(dcRead) / f32(0xFFFF)) * (u_params.colorMax - u_params.colorMin) + u_params.colorMin;
-	let dir = normalize(mean - u_params.camPos);
+	let dir = normalize(mean.xyz - u_params.camPos);
 
 	var color = SH_C0 * dc;
 	if(u_params.shDegree > 0)
@@ -256,7 +267,15 @@ fn preprocess(@builtin(global_invocation_id) GID: vec3u, @builtin(local_invocati
 	color += 0.5;
 
 	let opacityRead = (u_opacities[idx / 4] >> ((idx % 4) * 8)) & 0xFF;
-	let rgba = clamp(clipPos.z / clipPos.w + 1.0, 0.0, 1.0) * vec4f(color, f32(opacityRead) / 0xFF);
+	var opacity = f32(opacityRead) / 0xFF;
+	if(u_params.dynamic != 0)
+	{
+		let tOffset = u_params.time - mean.w;
+		let opacityMult = exp(-tOffset * tOffset / (2.0 * velocity.w * velocity.w));
+		opacity *= opacityMult;
+	}
+
+	let rgba = clamp(clipPos.z / clipPos.w + 1.0, 0.0, 1.0) * vec4f(color, opacity);
 
 	//determine write position within global buffer:
 	//---------------

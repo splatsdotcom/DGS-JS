@@ -32,6 +32,7 @@ struct Gaussians
 {
 	uint32_t shDegree = 0;
 	uint32_t count = 0;
+	bool dynamic = false;
 
 	std::vector<vec3> means;
 	std::vector<vec3> scales;
@@ -40,10 +41,15 @@ struct Gaussians
 	std::vector<vec3> colors;
 	std::vector<vec3> shs;
 
-	Gaussians(uint32_t shDegree = 0);
+	std::vector<vec3> velocities;
+	std::vector<float> tMeans;
+	std::vector<float> tStdevs;
+
+	Gaussians(uint32_t shDegree = 0, bool dynamic = false);
 
 	void add(const vec3& mean, const vec3& scale, const quaternion& rotation, 
-	         float opacity, const vec3& color, const std::vector<vec3>& sh);
+	         float opacity, const vec3& color, const std::vector<vec3>& sh = {},
+	         const vec3& velocity = vec3(0.0f), float tMean = 0.0f, float tStdev = 0.0f);
 };
 
 /**
@@ -53,13 +59,15 @@ struct GaussiansPacked
 {
 	uint32_t shDegree = 0;
 	uint32_t count = 0;
+	bool dynamic = false;
 
 	float colorMax = -0.5f;
 	float colorMin =  0.5f;
 	float shMax    = -0.5f;
 	float shMin    =  0.5f;
 
-	std::vector<vec4> means;        // stored as vec4 to respect GPU alignment rules, TODO fix this
+	std::vector<vec4> means;        // packed xyz mean and t mean
+	std::vector<vec4> velocities;   // packed xyz velocity and t stdev
 	std::vector<float> covariances;
 	std::vector<uint8_t> opacities; // unorm8  [0.0, 1.0]
 	std::vector<uint16_t> colors;   // unorm16 [colorMin, colorMax]

@@ -17,22 +17,23 @@
   </style>
 </head>
 <body>
-  <splat-player></splat-player>
+  <splat-player src-gs="fashion_diff.gs"></splat-player>
   <script type="module">
     import "../src/index.js";
 
-    let bufs = [];
-    for(let i = 0; i < 125; i++)
-    {
-      const response = await fetch(`latest_test/${i}.gs`);
-      if(!response.ok)
-        throw new Error("Failed to fetch buffer at ");
+  //   let bufs = [];
+  //   for(let i = 0; i < 25; i++)
+  //   {
+  //     const response = await fetch(`fashion_perframe/${i}.gs`);
+  //     if(!response.ok)
+  //       throw new Error("Failed to fetch buffer at ");
 
-      bufs.push(await response.arrayBuffer());
-    }
+  //     bufs.push(await response.arrayBuffer());
+  //   }
 
-  const player = document.querySelector('splat-player');
-  player.setSequenceGS(bufs, 25.0);
+  // const player = document.querySelector('splat-player');
+  // // player.setBackgroundColor([1.0,1.0,1.])
+  // player.setSequenceGS(bufs, 1.0 / 25.0);
   </script>
 </body>
 </html>

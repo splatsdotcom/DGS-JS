@@ -28,6 +28,7 @@ EMSCRIPTEN_BINDINGS(libmgs_js)
 
     	.property("length", &mgs::GaussiansPacked::count)
     	.property("shDegree", &mgs::GaussiansPacked::shDegree)
+    	.property("dynamic", &mgs::GaussiansPacked::dynamic)
     	.property("colorMin", &mgs::GaussiansPacked::colorMin)
     	.property("colorMax", &mgs::GaussiansPacked::colorMax)
     	.property("shMin", &mgs::GaussiansPacked::shMin)
@@ -70,6 +71,14 @@ EMSCRIPTEN_BINDINGS(libmgs_js)
 			return emscripten::val(emscripten::typed_memory_view(
 				self.shs.size() * sizeof(uint8_t), 
 				(const uint8_t*)self.shs.data()
+			));
+		}))
+
+		.property("velocities", emscripten::optional_override([](const mgs::GaussiansPacked& self)
+		{
+			return emscripten::val(emscripten::typed_memory_view(
+				self.velocities.size() * sizeof(vec4), 
+				(const uint8_t*)self.velocities.data()
 			));
 		}))
 

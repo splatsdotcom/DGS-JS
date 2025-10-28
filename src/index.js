@@ -124,34 +124,34 @@ export class SplatPlayer extends HTMLElement
 	setPLY(buf)
 	{
 		this.#frames = [ MGS.loadPly(buf) ];
-		this.#framerate = 1.0;
+		this.#timePerFrame = 1.0;
 		this.#curFrame = -1;
 	}
 
 	setGS(buf)
 	{
 		this.#frames = [ new MGS.Gaussians(buf) ];
-		this.#framerate = 1.0;
+		this.#timePerFrame = 1.0;
 		this.#curFrame = -1;
 	}
 
-	setSequencePLY(bufs, framerate)
+	setSequencePLY(bufs, timePerFrame)
 	{
-		if(framerate === undefined)
+		if(timePerFrame === undefined)
 			throw new Error('Must providea a framerate to setSequencePLY');
 
 		this.#frames = bufs.map(b => MGS.loadPly(b));
-		this.#framerate = framerate;
+		this.#timePerFrame = timePerFrame;
 		this.#curFrame = -1;
 	}
 
-	setSequenceGS(bufs, framerate)
+	setSequenceGS(bufs, timePerFrame)
 	{
-		if(framerate === undefined)
+		if(timePerFrame === undefined)
 			throw new Error('Must providea a framerate to setSequenceGS');
 
 		this.#frames = bufs.map(b => new MGS.Gaussians(b));
-		this.#framerate = framerate;
+		this.#timePerFrame = timePerFrame;
 		this.#curFrame = -1;
 	}
 
@@ -187,7 +187,7 @@ export class SplatPlayer extends HTMLElement
 	#resizeObserver = null;
 
 	#frames = [];
-	#framerate = 1.0;
+	#timePerFrame = 1.0;
 
 	#lastRenderTime = null;
 	#videoTime = 0.0;
@@ -207,10 +207,8 @@ export class SplatPlayer extends HTMLElement
 
 		this.#videoTime += dt;
 
-		let frameUnbounded = Math.round(this.#videoTime * this.#framerate);
+		let frameUnbounded = Math.round(this.#videoTime / this.#timePerFrame);
 		let frame = frameUnbounded % this.#frames.length;
-		if(Math.floor(frameUnbounded / this.#frames.length) % 2 == 1)
-			frame = this.#frames.length - frame - 1; //boomerang
 
 		if(frame !== this.#curFrame)
 		{
@@ -230,7 +228,7 @@ export class SplatPlayer extends HTMLElement
 
 		//render:
 		//---------------
-		this.#renderer.draw(view, proj, timestamp);
+		this.#renderer.draw(view, proj, this.#videoTime % this.#timePerFrame);
 
 		//loop:
 		//---------------
