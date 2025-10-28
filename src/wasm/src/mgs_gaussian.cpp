@@ -17,15 +17,16 @@ static inline uint32_t align(uint32_t a, uint32_t b)
 
 //-------------------------------------------//
 
-Gaussians::Gaussians(uint32_t _shDegree) : 
-	shDegree(_shDegree)
+Gaussians::Gaussians(uint32_t _shDegree, bool _dynamic) : 
+	shDegree(_shDegree), dynamic(_dynamic)
 {
 	if(_shDegree > MGS_MAX_SH_DEGREE)
 		throw std::invalid_argument("spherical haromics degree is too large");
 }
 
 void Gaussians::add(const vec3& mean, const vec3& scale, const quaternion& rotation, 
-                    float opacity, const vec3& color, const std::vector<vec3>& sh)
+                    float opacity, const vec3& color, const std::vector<vec3>& sh,
+                    const vec3& velocity, float tMean, float tStdev)
 {
 	if(sh.size() != (shDegree + 1) * (shDegree + 1) - 1)
 		throw std::invalid_argument("incorrect number of spherical haromics provided");
@@ -35,14 +36,22 @@ void Gaussians::add(const vec3& mean, const vec3& scale, const quaternion& rotat
 	rotations.push_back(rotation);
 	opacities.push_back(opacity);
 	colors.push_back(color);
+
 	for(uint32_t i = 0; i < sh.size(); i++)
 		shs.push_back(sh[i]);
+
+	if(dynamic)
+	{
+		velocities.push_back(velocity);
+		tMeans.push_back(tMean);
+		tStdevs.push_back(tStdev);
+	}
 
 	count++;
 }
 
 GaussiansPacked::GaussiansPacked(const Gaussians& gaussians) :
-	shDegree(gaussians.shDegree), count(gaussians.count)
+	shDegree(gaussians.shDegree), dynamic(gaussians.dynamic), count(gaussians.count)
 {
 	uint32_t numShCoeff = (shDegree + 1) * (shDegree + 1) - 1;
 	
@@ -85,11 +94,17 @@ GaussiansPacked::GaussiansPacked(const Gaussians& gaussians) :
 	opacities.resize(align(count, 4));
 	colors.resize(align(count * 3, 2));
 	shs.resize(align(count * numShCoeff * 3, 4));
+
+	if(dynamic)
+		velocities.resize(count);
 	
 	for(uint32_t i = 0; i < count; i++)
 	{
 		//mean:
-		means[i] = vec4(gaussians.means[i], 0.0f);
+		means[i] = vec4(
+			gaussians.means[i], 
+			dynamic ? gaussians.tMeans[i] : 0.0f
+		);
 
 		//covariance
 		mat4 M = qm::scale(gaussians.scales[i]) * quaternion_to_mat4(gaussians.rotations[i]);
@@ -121,6 +136,10 @@ GaussiansPacked::GaussiansPacked(const Gaussians& gaussians) :
 			shs[idx + 1] = (uint8_t)((gaussians.shs[i * numShCoeff + j].g - shMin) * shScale * UINT8_MAX);
 			shs[idx + 2] = (uint8_t)((gaussians.shs[i * numShCoeff + j].b - shMin) * shScale * UINT8_MAX);
 		}
+
+		//velocity:
+		if(dynamic)
+			velocities[i] = vec4(gaussians.velocities[i], gaussians.tStdevs[i]);
 	}
 }
 
@@ -141,6 +160,7 @@ GaussiansPacked::GaussiansPacked(const std::vector<uint8_t>& serialized)
 	//read header:
 	//-----------------
 	read(&shDegree, sizeof(uint32_t));
+	read(&dynamic, sizeof(bool));
 	read(&count, sizeof(uint32_t));
 	read(&colorMax, sizeof(float));
 	read(&colorMin, sizeof(float));
@@ -163,6 +183,8 @@ GaussiansPacked::GaussiansPacked(const std::vector<uint8_t>& serialized)
 	read_vector(opacities, align(count, 4));
 	read_vector(colors, align(count * 3, 2));
 	read_vector(shs, align(count * numShCoeff * 3, 4));
+	if(dynamic)
+		read_vector(velocities, count);
 
 	//validate:
 	//-----------------
@@ -183,6 +205,7 @@ std::vector<uint8_t> GaussiansPacked::serialize() const
 	};
 
 	append(&shDegree, sizeof(shDegree));
+	append(&dynamic, sizeof(dynamic));
 	append(&count, sizeof(count));
 	append(&colorMax, sizeof(colorMax));
 	append(&colorMin, sizeof(colorMin));
@@ -201,6 +224,8 @@ std::vector<uint8_t> GaussiansPacked::serialize() const
 	append_vector(opacities);
 	append_vector(colors);
 	append_vector(shs);
+	if(dynamic)
+		append_vector(velocities);
 
 	return data;
 }

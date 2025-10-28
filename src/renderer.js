@@ -55,18 +55,20 @@ class Renderer
 		this.#backgroundColor = color;
 	}
 
-	draw(view, proj, timestamp)
+	draw(view, proj, time)
 	{
 		if(!this.#gaussians)
 			return;
 
 		//get timing data:
 		//-----------------
+		let curRenderTime = performance.now();
+
 		var dt = 0.0;
 		if(this.#lastRenderTime)
-			dt = timestamp - this.#lastRenderTime;
+			dt = curRenderTime - this.#lastRenderTime;
 
-		this.#lastRenderTime = timestamp;
+		this.#lastRenderTime = curRenderTime;
 
 		//update bufs + get bind groups:
 		//---------------
@@ -74,7 +76,7 @@ class Renderer
 		const focalLengths = [ proj[0] * (this.#canvas.width / 2), proj[5] * (this.#canvas.height / 2) ];
 		const viewPort = [ this.#canvas.width, this.#canvas.height ];
 
-		this.#updateParamsBuffer(view, proj, camPos, focalLengths, viewPort);
+		this.#updateParamsBuffer(view, proj, camPos, focalLengths, viewPort, time);
 		const bindGroups = this.#createBindGroups();
 
 		//create query buffers:
@@ -463,6 +465,8 @@ class Renderer
 		size += 2 * SIZEOF_FLOAT32;     // viewport
 		size += 2 * SIZEOF_FLOAT32;     // min/max color
 		size += 2 * SIZEOF_FLOAT32;     // min/max sh
+		size += 1 * SIZEOF_UINT32;      // dynamic
+		size += 3 * SIZEOF_FLOAT32;     // time + padding
 
 		return device.createBuffer({
 			label: 'params',
@@ -517,6 +521,14 @@ class Renderer
 		});
 		device.queue.writeBuffer(shsBuf, 0, gaussians.shs);
 
+		const velocitiesBuf = this.#maybeReuseBuf(this.#gaussianBufs?.velocities, {
+			label: 'velocities',
+
+			size: Math.max(gaussians.velocities.byteLength, 16),
+			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+		});
+		device.queue.writeBuffer(velocitiesBuf, 0, gaussians.velocities);
+
 		const renderedGaussianBuf = this.#maybeReuseBuf(this.#gaussianBufs?.rendered, {
 			label: 'rendered gaussians',
 
@@ -544,6 +556,7 @@ class Renderer
 			opacities: opacitiesBuf,
 			colors: colorsBuf,
 			shs: shsBuf,
+			velocities: velocitiesBuf,
 
 			rendered: renderedGaussianBuf,
 			depths: gaussianDepthBuf,
@@ -551,7 +564,7 @@ class Renderer
 		};
 	}
 
-	#updateParamsBuffer(view, proj, camPos, focalLengths, viewPort)
+	#updateParamsBuffer(view, proj, camPos, focalLengths, viewPort, time)
 	{
 		const data = new ArrayBuffer(this.#paramsBuf.size);
 		const fData = new Float32Array(data);
@@ -583,6 +596,12 @@ class Renderer
 		fData.set([this.#gaussians.shMin, this.#gaussians.shMax], offset);
 		offset += 2;
 
+		uData.set([Number(this.#gaussians.dynamic)], offset);
+		offset += 1;
+
+		fData.set([time], offset);
+		offset += 1;
+
 		device.queue.writeBuffer(this.#paramsBuf, 0, data);
 	}
 
@@ -600,10 +619,11 @@ class Renderer
 				{ binding: 3, resource: { buffer: this.#gaussianBufs.opacities } },
 				{ binding: 4, resource: { buffer: this.#gaussianBufs.colors } },
 				{ binding: 5, resource: { buffer: this.#gaussianBufs.shs } },
+				{ binding: 6, resource: { buffer: this.#gaussianBufs.velocities } },
 
-				{ binding: 6, resource: { buffer: this.#gaussianBufs.rendered } },
-				{ binding: 7, resource: { buffer: this.#gaussianBufs.depths } },
-				{ binding: 8, resource: { buffer: this.#gaussianBufs.indices } }
+				{ binding: 7, resource: { buffer: this.#gaussianBufs.rendered } },
+				{ binding: 8, resource: { buffer: this.#gaussianBufs.depths } },
+				{ binding: 9, resource: { buffer: this.#gaussianBufs.indices } }
 			]
 		});
 

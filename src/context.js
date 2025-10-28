@@ -13,6 +13,7 @@ export const device = await adapter?.requestDevice({
 	requiredLimits: {
 		maxBufferSize: limits?.maxBufferSize,
 		maxStorageBufferBindingSize: limits?.maxStorageBufferBindingSize,
+		maxStorageBuffersPerShaderStage: limits?.maxStorageBuffersPerShaderStage
 	},
 });
 
