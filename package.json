@@ -1,6 +1,6 @@
 {
     "name": "splat-test",
-    "version": "0.1.27",
+    "version": "0.1.28",
     "main": "src/index.js",
     "files": [
         "src/**/*"
