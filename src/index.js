@@ -93,13 +93,16 @@ export class SplatPlayer extends HTMLElement
 		this.#scrubber.addEventListener('input', (e) => {
 			const t = parseFloat(this.#scrubber.value);
 			this.#videoTime = t;
-			const frame = Math.floor(this.#videoTime / this.#timePerFrame);
-			// clamp
-			const clampedFrame = Math.max(0, Math.min(this.#frames.length - 1, frame));
-			if (this.#frames[clampedFrame]) {
-				this.#renderer.setGaussians(this.#frames[clampedFrame]);
-				this.#curFrame = clampedFrame;
+			
+			let frame = Math.floor(this.#videoTime / this.#timePerFrame);
+			frame = Math.max(0, Math.min(this.#frames.length - 1, frame));
+			if(this.#frames[frame]) 
+			{
+				this.#renderer.setGaussians(this.#frames[frame]);
+				this.#curFrame = frame;
 			}
+
+			this.#playDirection = 1;
 		});
 
 		this.#scrubber.addEventListener('pointerdown', () => {
@@ -293,6 +296,7 @@ export class SplatPlayer extends HTMLElement
 	#lastRenderTime = null;
 	#videoTime = 0.0;
 	#curFrame = 0;
+	#playDirection = 1;
 
 	#isScrubbing = false;
 	#playing = true;
@@ -312,11 +316,23 @@ export class SplatPlayer extends HTMLElement
 			dt = timestamp - this.#lastRenderTime;
 
 		if(this.#playing && !this.#isScrubbing)
-			this.#videoTime += dt;
+			this.#videoTime += dt * this.#playDirection;
 
-		let frameUnbounded = Math.floor(this.#videoTime / this.#timePerFrame);
-		let frame = frameUnbounded % this.#frames.length;
+		const totalDuration = this.#frames.length * this.#timePerFrame;
+		if(this.#videoTime >= totalDuration) 
+		{
+			this.#videoTime = totalDuration - 0.001;
+			this.#playDirection = -1;
+		} 
+		else if (this.#videoTime <= 0.0) 
+		{
+			this.#videoTime = 0.0;
+			this.#playDirection = 1;
+		}
 
+		const frame = Math.floor(
+			Math.max(0, Math.min(this.#frames.length - 1, this.#videoTime / this.#timePerFrame))
+		);
 		if(frame !== this.#curFrame)
 		{
 			this.#renderer.setGaussians(this.#frames[frame]);
