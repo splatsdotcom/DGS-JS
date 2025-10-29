@@ -35,25 +35,34 @@ export class SplatPlayer extends HTMLElement
 		//create canvas:
 		//---------------
 		this.#canvas = document.createElement('canvas');
-		this.#canvas.style.width = '100%';
-		this.#canvas.style.height = '100%';
-		this.#canvas.style.display = 'block';
+		Object.assign(this.#canvas.style, {
+			width: '100%',
+			height: '100%',
+			display: 'block',
+		});
 		container.appendChild(this.#canvas);
 
 		//create controls container:
 		//---------------
 		const controls = document.createElement('div');
-		controls.style.position = 'absolute';
-		controls.style.bottom = '10px';
-		controls.style.left = '50%';
-		controls.style.transform = 'translateX(-50%)';
-		controls.style.display = 'flex';
-		controls.style.alignItems = 'center';
-		controls.style.gap = '10px';
-		controls.style.background = 'rgba(0, 0, 0, 0.4)';
-		controls.style.padding = '6px 12px';
-		controls.style.borderRadius = '8px';
-		controls.style.backdropFilter = 'blur(6px)';
+		Object.assign(controls.style, {
+			position: 'absolute',
+			bottom: '10px',
+			left: '50%',
+			transform: 'translateX(-50%)',
+			display: 'flex',
+			alignItems: 'center',
+			justifyContent: 'center',
+			gap: '10px',
+			background: 'rgba(0, 0, 0, 0.4)',
+			padding: '6px 12px',
+			borderRadius: '8px',
+			backdropFilter: 'blur(6px)',
+			boxSizing: 'border-box',
+			width: 'calc(100% - 20px)',
+			maxWidth: '600px',
+			flexWrap: 'wrap',
+		});
 		container.appendChild(controls);
 
 		//create play button:
@@ -68,6 +77,7 @@ export class SplatPlayer extends HTMLElement
 			fontSize: '24px',
 			cursor: 'pointer',
 			padding: '4px',
+			flexShrink: '0',
 		});
 		this.#playPauseBtn.addEventListener('click', () => {
 			this.#playing = !this.#playing;
@@ -83,7 +93,9 @@ export class SplatPlayer extends HTMLElement
 		this.#scrubber.step = 0.001; //milliseconds
 		this.#scrubber.value = 0;
 		Object.assign(this.#scrubber.style, {
-			width: '480px',
+			flex: '1 1 auto', // responsive width
+			minWidth: '120px',
+			maxWidth: '100%',
 			cursor: 'pointer',
 			accentColor: '#fff',
 		});
@@ -93,16 +105,20 @@ export class SplatPlayer extends HTMLElement
 		this.#scrubber.addEventListener('input', (e) => {
 			const t = parseFloat(this.#scrubber.value);
 			this.#videoTime = t;
-			
-			let frame = Math.floor(this.#videoTime / this.#timePerFrame);
-			frame = Math.max(0, Math.min(this.#frames.length - 1, frame));
-			if(this.#frames[frame]) 
-			{
-				this.#renderer.setGaussians(this.#frames[frame]);
-				this.#curFrame = frame;
-			}
 
-			this.#playDirection = 1;
+			let frameIndex;
+			if(t < this.#frames.length * this.#timePerFrame)
+				frameIndex = Math.floor(t / this.#timePerFrame);
+			else 
+			{
+				const tBack = t - this.#frames.length * this.#timePerFrame;
+				frameIndex = this.#frames.length - 1 - Math.floor(tBack / this.#timePerFrame);
+			}
+			frameIndex = Math.max(0, Math.min(this.#frames.length - 1, frameIndex));
+
+			if(this.#frames[frameIndex]) 
+				this.#renderer.setGaussians(this.#frames[frameIndex]);
+			this.#curFrame = frameIndex;
 		});
 
 		this.#scrubber.addEventListener('pointerdown', () => {
@@ -111,7 +127,6 @@ export class SplatPlayer extends HTMLElement
 
 		this.#scrubber.addEventListener('pointerup', (e) => {
 			this.#isScrubbing = false;
-			// ensure exact time/frame sync
 			const t = parseFloat(this.#scrubber.value);
 			this.#videoTime = t;
 			const frame = Math.floor(this.#videoTime / this.#timePerFrame);
@@ -296,7 +311,7 @@ export class SplatPlayer extends HTMLElement
 	#lastRenderTime = null;
 	#videoTime = 0.0;
 	#curFrame = 0;
-	#playDirection = 1;
+	#logicalDuration = 0.0;
 
 	#isScrubbing = false;
 	#playing = true;
@@ -315,34 +330,41 @@ export class SplatPlayer extends HTMLElement
 		if(this.#lastRenderTime)
 			dt = timestamp - this.#lastRenderTime;
 
-		if(this.#playing && !this.#isScrubbing)
-			this.#videoTime += dt * this.#playDirection;
-
-		const totalDuration = this.#frames.length * this.#timePerFrame;
-		if(this.#videoTime >= totalDuration) 
+		if(this.#playing && !this.#isScrubbing) 
 		{
-			this.#videoTime = totalDuration - 0.001;
-			this.#playDirection = -1;
-		} 
-		else if (this.#videoTime <= 0.0) 
-		{
-			this.#videoTime = 0.0;
-			this.#playDirection = 1;
+			this.#videoTime += dt;
+			if (this.#videoTime >= this.#logicalDuration)
+				this.#videoTime -= this.#logicalDuration; // loop back to start
 		}
 
-		const frame = Math.floor(
-			Math.max(0, Math.min(this.#frames.length - 1, this.#videoTime / this.#timePerFrame))
-		);
-		if(frame !== this.#curFrame)
+		const frameCount = this.#frames.length;
+		const halfDuration = frameCount * this.#timePerFrame;
+
+		let frameIndex, frameLocalTime;
+
+		if(this.#videoTime < halfDuration) 
 		{
-			this.#renderer.setGaussians(this.#frames[frame]);
-			this.#curFrame = frame;
+			frameIndex = Math.floor(this.#videoTime / this.#timePerFrame);
+			frameLocalTime = (this.#videoTime % this.#timePerFrame) / this.#timePerFrame;
+		}
+		else
+		{
+			const tBack = this.#videoTime - halfDuration;
+			frameIndex = frameCount - 1 - Math.floor(tBack / this.#timePerFrame);
+			frameLocalTime = 1 - ((tBack % this.#timePerFrame) / this.#timePerFrame);
+		}
+
+		frameIndex = Math.max(0, Math.min(frameCount - 1, frameIndex));
+		if(frameIndex !== this.#curFrame) 
+		{
+			this.#renderer.setGaussians(this.#frames[frameIndex]);
+			this.#curFrame = frameIndex;
 		}
 
 		//update scrubber:
 		//---------------
-		if(!this.#isScrubbing && this.#scrubber)
-			this.#scrubber.value = this.#videoTime % (this.#frames.length * this.#timePerFrame);
+		if(!this.#isScrubbing && this.#scrubber) 
+			this.#scrubber.value = this.#videoTime;
 
 		//update camera:
 		//---------------
@@ -356,7 +378,7 @@ export class SplatPlayer extends HTMLElement
 
 		//render:
 		//---------------
-		this.#renderer.draw(view, proj, (this.#videoTime % this.#timePerFrame) / this.#timePerFrame);
+		this.#renderer.draw(view, proj, frameLocalTime);
 
 		//loop:
 		//---------------
@@ -370,8 +392,10 @@ export class SplatPlayer extends HTMLElement
 		if(!this.#scrubber) 
 			return;
 
+		this.#logicalDuration = this.#frames.length * this.#timePerFrame * 2;
+
 		this.#scrubber.min = 0;
-		this.#scrubber.max = this.#frames.length * this.#timePerFrame - 0.001;
+		this.#scrubber.max = this.#logicalDuration - 0.001;
 		this.#scrubber.value = 0;
 	}
 
