@@ -106,14 +106,7 @@ export class SplatPlayer extends HTMLElement
 			const t = parseFloat(this.#scrubber.value);
 			this.#videoTime = t;
 
-			let frameIndex;
-			if(t < this.#frames.length * this.#timePerFrame)
-				frameIndex = Math.floor(t / this.#timePerFrame);
-			else 
-			{
-				const tBack = t - this.#frames.length * this.#timePerFrame;
-				frameIndex = this.#frames.length - 1 - Math.floor(tBack / this.#timePerFrame);
-			}
+			let frameIndex = Math.floor(t / this.#timePerFrame);
 			frameIndex = Math.max(0, Math.min(this.#frames.length - 1, frameIndex));
 
 			if(this.#frames[frameIndex]) 
@@ -311,7 +304,6 @@ export class SplatPlayer extends HTMLElement
 	#lastRenderTime = null;
 	#videoTime = 0.0;
 	#curFrame = 0;
-	#logicalDuration = 0.0;
 
 	#isScrubbing = false;
 	#playing = true;
@@ -330,31 +322,18 @@ export class SplatPlayer extends HTMLElement
 		if(this.#lastRenderTime)
 			dt = timestamp - this.#lastRenderTime;
 
-		if(this.#playing && !this.#isScrubbing) 
-		{
+		if(this.#playing && !this.#isScrubbing)
 			this.#videoTime += dt;
-			if (this.#videoTime >= this.#logicalDuration)
-				this.#videoTime -= this.#logicalDuration; // loop back to start
-		}
 
-		const frameCount = this.#frames.length;
-		const halfDuration = frameCount * this.#timePerFrame;
+		const duration = this.#frames.length * this.#timePerFrame;
+		this.#videoTime %= duration;
 
-		let frameIndex, frameLocalTime;
+		let frameIndex = Math.floor(this.#videoTime / this.#timePerFrame);
+		frameIndex = Math.max(0, Math.min(this.#frames.length - 1, frameIndex));
+		
+		let frameLocalTime = (this.#videoTime % this.#timePerFrame) / this.#timePerFrame;
+		frameLocalTime = Math.max(0.0, Math.min(1.0, frameLocalTime));
 
-		if(this.#videoTime < halfDuration) 
-		{
-			frameIndex = Math.floor(this.#videoTime / this.#timePerFrame);
-			frameLocalTime = (this.#videoTime % this.#timePerFrame) / this.#timePerFrame;
-		}
-		else
-		{
-			const tBack = this.#videoTime - halfDuration;
-			frameIndex = frameCount - 1 - Math.floor(tBack / this.#timePerFrame);
-			frameLocalTime = 1 - ((tBack % this.#timePerFrame) / this.#timePerFrame);
-		}
-
-		frameIndex = Math.max(0, Math.min(frameCount - 1, frameIndex));
 		if(frameIndex !== this.#curFrame) 
 		{
 			this.#renderer.setGaussians(this.#frames[frameIndex]);
@@ -392,10 +371,8 @@ export class SplatPlayer extends HTMLElement
 		if(!this.#scrubber) 
 			return;
 
-		this.#logicalDuration = this.#frames.length * this.#timePerFrame * 2;
-
 		this.#scrubber.min = 0;
-		this.#scrubber.max = this.#logicalDuration - 0.001;
+		this.#scrubber.max = this.#frames.length * this.#timePerFrame - 0.001;
 		this.#scrubber.value = 0;
 	}
 
