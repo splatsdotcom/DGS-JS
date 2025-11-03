@@ -12,7 +12,7 @@ const RENDERER_NUM_TIMESTAMP_QUERIES = 6;
 //-------------------------//
 
 import { mat4, vec3 } from 'gl-matrix';
-import { GPU_PROFILING, device } from './context.js';
+import { adapter, device } from './context.js';
 import RadixSortKernel from './radix_sort_kernel.js';
 
 import GAUSSIAN_PREPROCESS_SHADER_SRC from './shaders/gaussian_preprocess.wgsl?raw';
@@ -35,7 +35,7 @@ class Renderer
 		this.#geomBufs = this.#createGeometryBuffers();
 		this.#paramsBuf = this.#createParamsBuffer();
 
-		if(GPU_PROFILING)
+		if(adapter.features.has('timestamp-query'))
 			this.#profiler = this.#createProfiler();
 	}
 
@@ -55,10 +55,13 @@ class Renderer
 		this.#backgroundColor = color;
 	}
 
-	draw(view, proj, time)
+	draw(view, proj, time, profile = false)
 	{
 		if(!this.#gaussians)
 			return;
+
+		if(this.#profiler == null)
+			profile = false;
 
 		//get timing data:
 		//-----------------
@@ -83,7 +86,7 @@ class Renderer
 		//-----------------
 		let queryBuffer = null;
 		let queryReadbackBuffer = null;
-		if(GPU_PROFILING)
+		if(profile)
 		{
 			queryBuffer = device.createBuffer({
 				size: RENDERER_NUM_TIMESTAMP_QUERIES * 8,
@@ -115,7 +118,7 @@ class Renderer
 		device.queue.writeBuffer(this.#gaussianBufs.depths, 0, gaussianDepthClearValue); //TODO: please dont do this
 
 		const preprocessPass = encoder.beginComputePass({
-			timestampWrites: GPU_PROFILING ? {
+			timestampWrites: profile ? {
 				querySet: this.#profiler.querySet,
 				beginningOfPassWriteIndex: 0,
 				endOfPassWriteIndex: 1
@@ -132,7 +135,7 @@ class Renderer
 		//sort by distance:
 		//---------------
 		const sortPass = encoder.beginComputePass({
-			timestampWrites: GPU_PROFILING ? {
+			timestampWrites: profile ? {
 				querySet: this.#profiler.querySet,
 				beginningOfPassWriteIndex: 2,
 				endOfPassWriteIndex: 3
@@ -157,7 +160,7 @@ class Renderer
 				storeOp: 'store'
 			}],
 
-			timestampWrites: GPU_PROFILING ? {
+			timestampWrites: profile ? {
 				querySet: this.#profiler.querySet,
 				beginningOfPassWriteIndex: 4,
 				endOfPassWriteIndex: 5
@@ -193,7 +196,7 @@ class Renderer
 
 		//submit command buffer:
 		//---------------
-		if(GPU_PROFILING)
+		if(profile)
 		{
 			encoder.resolveQuerySet(this.#profiler.querySet, 0, RENDERER_NUM_TIMESTAMP_QUERIES, queryBuffer, 0);
 			encoder.copyBufferToBuffer(queryBuffer, 0, queryReadbackBuffer, 0, RENDERER_NUM_TIMESTAMP_QUERIES * 8);
@@ -203,7 +206,7 @@ class Renderer
 
 		//read profiling data:
 		//-----------------
-		if(GPU_PROFILING)
+		if(profile)
 		{
 			queryReadbackBuffer.mapAsync(GPUMapMode.READ).then(() => {
 				const timestampsBuf = queryReadbackBuffer.getMappedRange();

@@ -198,7 +198,8 @@ export class SplatPlayer extends HTMLElement
 		return [
 			'src-ply',
 			'src-gs', 
-			'camera'
+			'camera',
+			'debug'
 		];
 	}
 
@@ -234,6 +235,11 @@ export class SplatPlayer extends HTMLElement
 			}
 
 			this.setCamera(type, params);
+			break;
+		}
+		case 'debug':
+		{
+			this.#debug = newValue === 'on' ? true : false;
 			break;
 		}
 		default:
@@ -318,15 +324,17 @@ export class SplatPlayer extends HTMLElement
 	#camera = null;
 	#resizeObserver = null;
 
+	#debug = false;
+
 	#frames = [];
 	#timePerFrame = 1.0;
 
 	#lastRenderTime = null;
 	#videoTime = 0.0;
 	#curFrame = 0;
-
 	#isScrubbing = false;
 	#playing = true;
+
 	#playPauseBtn = null;
 	#scrubber = null;
 	#debugOverlay = null;
@@ -378,7 +386,7 @@ export class SplatPlayer extends HTMLElement
 
 		//render:
 		//---------------
-		const profile = this.#renderer.draw(view, proj, frameLocalTime);
+		const profile = this.#renderer.draw(view, proj, frameLocalTime, this.#debug);
 
 		//update profiling display:
 		//---------------
