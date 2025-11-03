@@ -224,22 +224,17 @@ class Renderer
 					const avgRasterTime     = (this.#profiler.accumRasterTime     / 1000000) / this.#profiler.accumFrames;
 					const avgTime = avgPreprocessTime + avgSortTime + avgRasterTime;
 
-					const lines = [
-						`GPU time: ${avgTime.toPrecision(3)}ms/frame`,
-						`  - ${avgPreprocessTime.toPrecision(3)}ms preprocessing`,
-						`  - ${avgSortTime.toPrecision(3)}ms sorting`,
-						`  - ${avgRasterTime.toPrecision(3)}ms rasterizing`,
-					];
-					console.log(lines.join('\n'));
-
-					this.#profiler.accumFrames = 0;
-					this.#profiler.accumTime = 0.0;
-					this.#profiler.accumPreprocessTime = 0;
-					this.#profiler.accumSortTime = 0;
-					this.#profiler.accumRasterTime = 0;
+					this.#latestProfile = {
+						preprocessTime: avgPreprocessTime,
+						sortTime: avgSortTime,
+						rasterTime: avgRasterTime,
+						totalTime: avgTime
+					}
 				}
 			});
 		}
+
+		return this.#latestProfile;
 	}
 
 	//-------------------------//
@@ -261,6 +256,8 @@ class Renderer
 
 	#lastRenderTime = null;
 
+	#latestProfile = null;
+	
 	//-------------------------//
 
 	#createContext()
