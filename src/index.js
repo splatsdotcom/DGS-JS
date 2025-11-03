@@ -42,6 +42,26 @@ export class SplatPlayer extends HTMLElement
 		});
 		container.appendChild(this.#canvas);
 
+		//create debug overlay:
+		//---------------
+		this.#debugOverlay = document.createElement('div');
+		Object.assign(this.#debugOverlay.style, {
+			position: 'absolute',
+			top: '8px',
+			left: '8px',
+			color: 'white',
+			background: 'rgba(0,0,0,0.4)',
+			padding: '4px 8px',
+			fontFamily: 'monospace',
+			fontSize: '12px',
+			borderRadius: '4px',
+			backdropFilter: 'blur(6px)',
+			whiteSpace: 'pre',
+			pointerEvents: 'none',
+			userSelect: 'none'
+		});
+		container.appendChild(this.#debugOverlay);
+
 		//create controls container:
 		//---------------
 		const controls = document.createElement('div');
@@ -93,7 +113,7 @@ export class SplatPlayer extends HTMLElement
 		this.#scrubber.step = 0.001; //milliseconds
 		this.#scrubber.value = 0;
 		Object.assign(this.#scrubber.style, {
-			flex: '1 1 auto', // responsive width
+			flex: '1 1 auto',
 			minWidth: '120px',
 			maxWidth: '100%',
 			cursor: 'pointer',
@@ -309,6 +329,7 @@ export class SplatPlayer extends HTMLElement
 	#playing = true;
 	#playPauseBtn = null;
 	#scrubber = null;
+	#debugOverlay = null;
 
 	//-------------------------//
 
@@ -357,7 +378,21 @@ export class SplatPlayer extends HTMLElement
 
 		//render:
 		//---------------
-		this.#renderer.draw(view, proj, frameLocalTime);
+		const profile = this.#renderer.draw(view, proj, frameLocalTime);
+
+		//update profiling display:
+		//---------------
+		if(profile) 
+		{
+			this.#debugOverlay.style.opacity = '1';
+			this.#debugOverlay.textContent = 
+				`Preprocess: ${profile.preprocessTime.toFixed(2)} ms\n` +
+				`Sort:       ${profile.sortTime.toFixed(2)} ms\n` +
+				`Raster:     ${profile.rasterTime.toFixed(2)} ms\n` +
+				`Total:      ${profile.totalTime.toFixed(2)} ms`;
+		}
+		else
+			this.#debugOverlay.style.opacity = '0';
 
 		//loop:
 		//---------------

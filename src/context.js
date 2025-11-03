@@ -3,7 +3,7 @@
  * initializes the WebGPU context
  */
 
-export const GPU_PROFILING = false; //NOTE: set to false before pushing!!!
+export const GPU_PROFILING = true; //NOTE: set to false before pushing!!!
 
 export const adapter = await navigator.gpu?.requestAdapter();
 
