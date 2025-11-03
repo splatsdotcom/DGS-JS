@@ -3,13 +3,13 @@
  * initializes the WebGPU context
  */
 
-export const GPU_PROFILING = true; //NOTE: set to false before pushing!!!
-
 export const adapter = await navigator.gpu?.requestAdapter();
 
 const limits = adapter?.limits;
+const features = adapter?.features;
+
 export const device = await adapter?.requestDevice({
-	requiredFeatures: GPU_PROFILING ? ['timestamp-query'] : [],
+	requiredFeatures: features?.has('timestamp-query') ? ['timestamp-query'] : [],
 	requiredLimits: {
 		maxBufferSize: limits?.maxBufferSize,
 		maxStorageBufferBindingSize: limits?.maxStorageBufferBindingSize,
