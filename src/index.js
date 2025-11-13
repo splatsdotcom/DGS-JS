@@ -381,10 +381,12 @@ export class SplatPlayer extends HTMLElement
 
 		//render:
 		//---------------
-		const profile = this.#renderer.draw(view, proj, frameLocalTime, this.#debug);
+		this.#renderer.draw(view, proj, frameLocalTime, this.#debug);
 
 		//update profiling display:
 		//---------------
+		const profile = this.#renderer.getPerformanceProfile();
+
 		this.#debugOverlay.style.opacity = '1';
 		this.#debugOverlay.textContent = 
 			`Frame Time: ${this.#formatProfile(profile.totalTime)}\n` +

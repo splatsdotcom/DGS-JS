@@ -64,7 +64,7 @@ class Renderer
 	draw(view, proj, time, profile = false)
 	{
 		if(!this.#gaussians)
-			return {};
+			return this.#latestProfile;
 
 		if(this.#profiler == null)
 			profile = false;
@@ -155,7 +155,8 @@ class Renderer
 		preprocessPass.setPipeline(this.#preprocessPipeline);
 		preprocessPass.setBindGroup(0, bindGroups.preprocess);
 
-		preprocessPass.dispatchWorkgroups(Math.ceil(this.#numGaussiansVisible / GAUSSIAN_PREPROCESS_WORKGROUP_SIZE));
+		if(this.#numGaussiansVisible > 0)
+			preprocessPass.dispatchWorkgroups(Math.ceil(this.#numGaussiansVisible / GAUSSIAN_PREPROCESS_WORKGROUP_SIZE));
 
 		preprocessPass.end();
 
@@ -183,7 +184,8 @@ class Renderer
 		rasterPass.setIndexBuffer(this.#geomBufs.index, 'uint16');
 		rasterPass.setBindGroup(0, bindGroups.rasterize);
 
-		rasterPass.drawIndexed(6, this.#numGaussiansVisible);
+		if(this.#numGaussiansVisible > 0)
+			rasterPass.drawIndexed(6, this.#numGaussiansVisible);
 
 		rasterPass.end();
 
@@ -247,6 +249,11 @@ class Renderer
 			});
 		}
 
+		return this.#latestProfile;
+	}
+
+	getPerformanceProfile()
+	{
 		return this.#latestProfile;
 	}
 
