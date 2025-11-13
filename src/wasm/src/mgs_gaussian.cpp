@@ -8,6 +8,8 @@
 namespace mgs
 {
 
+#define MGS_GAUSSIAN_CLIP_THRESHHOLD 1.2f
+
 //-------------------------------------------//
 
 static inline uint32_t align(uint32_t a, uint32_t b)
@@ -228,6 +230,48 @@ std::vector<uint8_t> GaussiansPacked::serialize() const
 		append_vector(velocities);
 
 	return data;
+}
+
+std::vector<uint32_t> GaussiansPacked::cull_and_sort(const mat4& view, const mat4& proj, float time) const
+{
+	return cull_and_sort_from_bufs(count, means.data(), velocities.data(), view, proj, time);
+}
+
+std::vector<uint32_t> GaussiansPacked::cull_and_sort_from_bufs(uint32_t count, const vec4* means, const vec4* velocities, const mat4& view, const mat4& proj, float time)
+{
+	//compute depths + cull:
+	//---------------
+	std::vector<uint32_t> sortedIndices;
+	std::vector<float> depths(count);
+	for(uint32_t i = 0; i < count; i++)
+	{
+		vec3 mean = means[i].xyz() + velocities[i].xyz() * time;
+		vec4 camPos = view * vec4(mean, 1.0);
+		vec4 clipPos = proj * camPos;
+
+		float clip = MGS_GAUSSIAN_CLIP_THRESHHOLD * clipPos.w;
+		if(clipPos.x >  clip || clipPos.y >  clip || clipPos.z >  clip ||
+		   clipPos.x < -clip || clipPos.y < -clip || clipPos.z < -clip)
+			continue;
+
+		sortedIndices.push_back(i);
+		depths[i] = camPos.z;
+	}
+
+	//sort:
+	//---------------
+
+	//TODO: use a better algorithm !
+	//TODO: multithread this + merge results !
+
+	std::sort(
+		sortedIndices.begin(), sortedIndices.end(),
+		[&depths](uint32_t a, uint32_t b) {
+			return depths[a] > depths[b];
+		}
+	);
+
+	return sortedIndices;
 }
 
 }; //namespace mgs

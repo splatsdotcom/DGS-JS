@@ -77,6 +77,9 @@ struct GaussiansPacked
 	GaussiansPacked(const std::vector<uint8_t>& serialized);
 
 	std::vector<uint8_t> serialize() const;
+
+	std::vector<uint32_t> cull_and_sort(const mat4& view, const mat4& proj, float time) const;
+	static std::vector<uint32_t> cull_and_sort_from_bufs(uint32_t count, const vec4* means, const vec4* velocities, const mat4& view, const mat4& proj, float time);
 };
 
 }; //namespace mgs

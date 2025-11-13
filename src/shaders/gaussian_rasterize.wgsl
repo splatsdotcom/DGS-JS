@@ -28,17 +28,6 @@ struct RenderedGaussian
 	center: vec2f
 };
 
-struct RenderedGaussians
-{
-	indirectIndexCount: u32,
-	numGaussians: u32, //or indirectInstanceCount
-	indirectFirstIndex: u32,
-	indirectBaseVertex: u32,
-	indirectFirstInstance: u32,
-
-	gaussians: array<RenderedGaussian>
-};
-
 struct VertexOutput 
 {
 	@builtin(position) pos : vec4f,
@@ -50,14 +39,14 @@ struct VertexOutput
 //-------------------------//
 
 @binding(0) @group(0) var<uniform> u_params: Params;
-@binding(1) @group(0) var<storage, read> u_gaussians: RenderedGaussians;
+@binding(1) @group(0) var<storage, read> u_gaussians: array<RenderedGaussian>;
 
 //-------------------------//
 
 @vertex
-fn vs(@location(0) quadPos: vec2<f32>, @location(1) idx: u32) -> VertexOutput 
+fn vs(@location(0) quadPos: vec2<f32>, @builtin(instance_index) idx: u32) -> VertexOutput 
 {
-    let g = u_gaussians.gaussians[idx];
+    let g = u_gaussians[idx];
 	var out: VertexOutput;
 
     out.localPos = quadPos;

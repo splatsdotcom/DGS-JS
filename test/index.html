@@ -17,11 +17,11 @@
   </style>
 </head>
 <body>
-  <splat-player debug="off"></splat-player>
+  <splat-player debug="on" src-ply="0.ply"></splat-player>
   <script type="module">
     import "../src/index.js";
 
-    let bufs = [];
+    /*let bufs = [];
     for(let i = 0; i < 25; i++)
     {
       const response = await fetch(`fashion_diff_gs/${i}.gs`);
@@ -29,16 +29,30 @@
         throw new Error("Failed to fetch buffer at ");
 
       bufs.push(await response.arrayBuffer());
-    }
+    }*/
 
   const player = document.querySelector('splat-player');
   // player.setBackgroundColor([1.0,1.0,1.])
-  player.setSequenceGS(bufs, 11.0 / 25.0);
-  player.setCamera('default', {
-    keyMoveSpeed: 0.005,
-    minRadius: 0.01,
-    maxRadius: 1.0
-  })
+  // player.setSequenceGS(bufs, 11.0 / 25.0);
+        /*player.setCamera('snap', {
+          // minRadius: 0.125,
+          // maxRadius: 0.3,
+          radius: 0.18,
+          maxRadius: 0.25,
+          minRadius: 0.18,
+          baseTheta: Math.PI,
+          basePhi: -0.2,
+          theta: Math.PI,
+          phi: -0.2,
+          targetX: -0.00,
+          targetY: -0.02,
+          targetZ: 0.22,
+          resistance: 0.7,
+          deadZone: 0.1,
+          snapSmoothness: 0.9925,
+          valueSmoothness: 0.9925,
+          fov: 45,
+        });*/
   </script>
 </body>
 </html>
