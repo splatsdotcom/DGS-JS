@@ -7,13 +7,16 @@ const SIZEOF_FLOAT32 = Float32Array.BYTES_PER_ELEMENT;
 const SIZEOF_UINT32  = Uint32Array.BYTES_PER_ELEMENT;
 
 const GAUSSIAN_PREPROCESS_WORKGROUP_SIZE = 64;
-const RENDERER_NUM_TIMESTAMP_QUERIES = 6;
+const RENDERER_NUM_TIMESTAMP_QUERIES = 4;
+
+const RESORT_DIR_CUTOFF = 0.001;
+const RESORT_POS_CUTOFF = 0.001; //TODO: tweak these
+const RESORT_TIME_CUTOFF = 0.0;
 
 //-------------------------//
 
 import { mat4, vec3 } from 'gl-matrix';
 import { adapter, device } from './context.js';
-import RadixSortKernel from './radix_sort_kernel.js';
 
 import GAUSSIAN_PREPROCESS_SHADER_SRC from './shaders/gaussian_preprocess.wgsl?raw';
 import GAUSSIAN_RASTERIZE_SHADER_SRC  from './shaders/gaussian_rasterize.wgsl?raw';
@@ -34,6 +37,7 @@ class Renderer
 		this.#compositePipeline = this.#createCompositePipeline();
 		this.#geomBufs = this.#createGeometryBuffers();
 		this.#paramsBuf = this.#createParamsBuffer();
+		this.#sortWorker = this.#createSortWorker();
 
 		if(adapter.features.has('timestamp-query'))
 			this.#profiler = this.#createProfiler();
@@ -48,6 +52,8 @@ class Renderer
 	{
 		this.#gaussians = gaussians;
 		this.#gaussianBufs = this.#createGaussianBufs(this.#gaussians);
+
+		this.#lastSortParams = null; //TODO: allow you to give the gaussians presorted !
 	}
 
 	setBackgroundColor(color)
@@ -58,10 +64,43 @@ class Renderer
 	draw(view, proj, time, profile = false)
 	{
 		if(!this.#gaussians)
-			return;
+			return {};
 
 		if(this.#profiler == null)
 			profile = false;
+
+		//resort if needed:
+		//-----------------
+		if(this.#lastSortParams == null)
+		{
+			//need to sort synchronously if not already sorted
+			const sorted = this.#gaussians.cull_and_sort(view, proj, time);
+	
+			this.#numGaussiansVisible = sorted.length;
+			device.queue.writeBuffer(this.#gaussianBufs.sortedIndices, 0, sorted);
+
+			this.#lastSortParams = {
+				view: view.slice(),
+				time: time
+			};
+		}
+		else if(this.#sortWorkerReady && this.#shouldResort(view, time) && !this.#sortPending) 
+		{
+			this.#sortPending = true;
+			this.#lastSortParams = {
+				view: view.slice(),
+				time: time
+			};
+
+			this.#sortStartTime = performance.now();
+			this.#sortWorker.postMessage({
+				means: this.#gaussians.means.slice(),
+				velocities: this.#gaussians.velocities.slice(),
+				view: view.slice(),
+				proj: proj.slice(),
+				time: time
+			});
+		}
 
 		//get timing data:
 		//-----------------
@@ -105,18 +144,6 @@ class Renderer
 
 		//preprocess:
 		//---------------
-		const renderedGaussianBufClearValue = new Uint32Array([
-			6, //index count
-			0, //instance count (incremented in shader)
-			0, //first index
-			0, //base vertex
-			0  //first instance
-		]);
-		device.queue.writeBuffer(this.#gaussianBufs.rendered, 0, renderedGaussianBufClearValue);
-
-		const gaussianDepthClearValue = new Uint32Array(this.#gaussians.length).fill(0xFFFFFFFF);
-		device.queue.writeBuffer(this.#gaussianBufs.depths, 0, gaussianDepthClearValue); //TODO: please dont do this
-
 		const preprocessPass = encoder.beginComputePass({
 			timestampWrites: profile ? {
 				querySet: this.#profiler.querySet,
@@ -128,25 +155,9 @@ class Renderer
 		preprocessPass.setPipeline(this.#preprocessPipeline);
 		preprocessPass.setBindGroup(0, bindGroups.preprocess);
 
-		preprocessPass.dispatchWorkgroups(Math.ceil(this.#gaussians.length / GAUSSIAN_PREPROCESS_WORKGROUP_SIZE));
+		preprocessPass.dispatchWorkgroups(Math.ceil(this.#numGaussiansVisible / GAUSSIAN_PREPROCESS_WORKGROUP_SIZE));
 
 		preprocessPass.end();
-
-		//sort by distance:
-		//---------------
-		const sortPass = encoder.beginComputePass({
-			timestampWrites: profile ? {
-				querySet: this.#profiler.querySet,
-				beginningOfPassWriteIndex: 2,
-				endOfPassWriteIndex: 3
-			} : undefined
-		});
-
-		//TODO: actually read number of rendered gaussians!!!!
-		const sort = new RadixSortKernel(this.#gaussians.length, this.#gaussianBufs.depths, this.#gaussianBufs.indices, 32);
-		sort.dispatch(sortPass);
-
-		sortPass.end();
 
 		//rasterize:
 		//---------------
@@ -162,18 +173,17 @@ class Renderer
 
 			timestampWrites: profile ? {
 				querySet: this.#profiler.querySet,
-				beginningOfPassWriteIndex: 4,
-				endOfPassWriteIndex: 5
+				beginningOfPassWriteIndex: 2,
+				endOfPassWriteIndex: 3
 			} : undefined
 		});
 
 		rasterPass.setPipeline(this.#rasterizePipeline);
 		rasterPass.setVertexBuffer(0, this.#geomBufs.vertex);
-		rasterPass.setVertexBuffer(1, this.#gaussianBufs.indices);
 		rasterPass.setIndexBuffer(this.#geomBufs.index, 'uint16');
 		rasterPass.setBindGroup(0, bindGroups.rasterize);
 
-		rasterPass.drawIndexedIndirect(this.#gaussianBufs.rendered, 0);
+		rasterPass.drawIndexed(6, this.#numGaussiansVisible);
 
 		rasterPass.end();
 
@@ -215,24 +225,24 @@ class Renderer
 				this.#profiler.accumFrames++;
 				this.#profiler.accumTime += dt;
 				this.#profiler.accumPreprocessTime += Number(timestamps[1] - timestamps[0]);
-				this.#profiler.accumSortTime       += Number(timestamps[3] - timestamps[2]);
-				this.#profiler.accumRasterTime     += Number(timestamps[5] - timestamps[4]);
+				this.#profiler.accumRasterTime     += Number(timestamps[3] - timestamps[2]);
 
 				queryReadbackBuffer.unmap();
 
-				if(this.#profiler.accumTime >= 1.0)
+				if(this.#profiler.accumTime >= 1000.0)
 				{
 					const avgPreprocessTime = (this.#profiler.accumPreprocessTime / 1000000) / this.#profiler.accumFrames;
-					const avgSortTime       = (this.#profiler.accumSortTime       / 1000000) / this.#profiler.accumFrames;
 					const avgRasterTime     = (this.#profiler.accumRasterTime     / 1000000) / this.#profiler.accumFrames;
-					const avgTime = avgPreprocessTime + avgSortTime + avgRasterTime;
+					const avgTime = avgPreprocessTime + avgRasterTime;
 
-					this.#latestProfile = {
-						preprocessTime: avgPreprocessTime,
-						sortTime: avgSortTime,
-						rasterTime: avgRasterTime,
-						totalTime: avgTime
-					}
+					this.#latestProfile.preprocessTime = avgPreprocessTime,
+					this.#latestProfile.rasterTime = avgRasterTime,
+					this.#latestProfile.totalTime = avgTime
+
+					this.#profiler.accumFrames = 0;
+					this.#profiler.accumTime = 0.0;
+					this.#profiler.accumPreprocessTime = 0.0;
+					this.#profiler.accumRasterTime = 0.0;
 				}
 			});
 		}
@@ -256,10 +266,17 @@ class Renderer
 	#gaussianBufs = null;
 	#geomBufs = null;
 	#paramsBuf = null;
+	#numGaussiansVisible = 0;
+
+	#sortWorker = null;
+	#sortWorkerReady = false;
+	#sortPending = false;
+	#sortStartTime = null;
+	#lastSortParams = null;
 
 	#lastRenderTime = null;
 
-	#latestProfile = null;
+	#latestProfile = {};
 	
 	//-------------------------//
 
@@ -341,13 +358,6 @@ class Renderer
 						attributes: [{ 
 							shaderLocation: 0, offset: 0, format: 'float32x2' //position
 						}]
-					},
-					{
-						stepMode: 'instance',
-						arrayStride: SIZEOF_UINT32,
-						attributes: [{ 
-							shaderLocation: 1, offset: 0, format: 'uint32' //index
-						}]
 					}
 				]
 			},
@@ -409,7 +419,6 @@ class Renderer
 			accumFrames: 0,
 			accumTime: 0,
 			accumRasterTime: 0,
-			accumSortTime: 0,
 			accumPreprocessTime: 0
 		};
 	}
@@ -466,7 +475,8 @@ class Renderer
 		size += 2 * SIZEOF_FLOAT32;     // min/max color
 		size += 2 * SIZEOF_FLOAT32;     // min/max sh
 		size += 1 * SIZEOF_UINT32;      // dynamic
-		size += 3 * SIZEOF_FLOAT32;     // time + padding
+		size += 1 * SIZEOF_FLOAT32;     // time
+		size += 2 * SIZEOF_UINT32;      // num gaussians + padding
 
 		return device.createBuffer({
 			label: 'params',
@@ -476,10 +486,33 @@ class Renderer
 		});
 	}
 
+	#createSortWorker()
+	{
+		const worker = new Worker(new URL('./sort_worker.js', import.meta.url), { type: 'module' });
+		worker.onmessage = (e) => {
+			if(e.data.type === 'ready')
+				this.#sortWorkerReady = true;
+			else if(e.data.type === 'sort')
+			{
+				const sorted = e.data.sorted;
+				if(sorted)
+				{
+					this.#numGaussiansVisible = sorted.length;
+					device.queue.writeBuffer(this.#gaussianBufs.sortedIndices, 0, sorted);
+				}
+
+				this.#latestProfile.lastSortTime = performance.now() - this.#sortStartTime;
+			}
+
+			this.#sortPending = false;
+		};
+
+		return worker;
+	}
+
 	#createGaussianBufs(gaussians)
 	{
 		const renderedGaussianSize = 12 * SIZEOF_FLOAT32;
-		const renderedGaussianHeaderSize = 8 * SIZEOF_UINT32;
 
 		const meansBuf = this.#maybeReuseBuf(this.#gaussianBufs?.means, {
 			label: 'means',
@@ -528,26 +561,19 @@ class Renderer
 			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
 		});
 		device.queue.writeBuffer(velocitiesBuf, 0, gaussians.velocities);
+		
+		const sortedIndicesBuf = this.#maybeReuseBuf(this.#gaussianBufs?.sortedIndices, {
+			label: 'sorted indices',
+
+			size: gaussians.length * SIZEOF_UINT32,
+			usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE
+		});
 
 		const renderedGaussianBuf = this.#maybeReuseBuf(this.#gaussianBufs?.rendered, {
 			label: 'rendered gaussians',
 
-			size: renderedGaussianHeaderSize + gaussians.length * renderedGaussianSize,
+			size: gaussians.length * renderedGaussianSize,
 			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.INDIRECT
-		});
-
-		const gaussianDepthBuf = this.#maybeReuseBuf(this.#gaussianBufs?.depths, {
-			label: 'gaussian depths',
-
-			size: gaussians.length * SIZEOF_UINT32,
-			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
-		});
-
-		const gaussianIndexBuf = this.#maybeReuseBuf(this.#gaussianBufs?.indices, {
-			label: 'gaussian indices',
-
-			size: gaussians.length * SIZEOF_UINT32,
-			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.VERTEX
 		});
 
 		return {
@@ -557,10 +583,9 @@ class Renderer
 			colors: colorsBuf,
 			shs: shsBuf,
 			velocities: velocitiesBuf,
+			sortedIndices: sortedIndicesBuf,
 
-			rendered: renderedGaussianBuf,
-			depths: gaussianDepthBuf,
-			indices: gaussianIndexBuf
+			rendered: renderedGaussianBuf
 		};
 	}
 
@@ -602,6 +627,9 @@ class Renderer
 		fData.set([time], offset);
 		offset += 1;
 
+		uData.set([this.#numGaussiansVisible], offset);
+		offset += 1;
+
 		device.queue.writeBuffer(this.#paramsBuf, 0, data);
 	}
 
@@ -620,10 +648,9 @@ class Renderer
 				{ binding: 4, resource: { buffer: this.#gaussianBufs.colors } },
 				{ binding: 5, resource: { buffer: this.#gaussianBufs.shs } },
 				{ binding: 6, resource: { buffer: this.#gaussianBufs.velocities } },
+				{ binding: 7, resource: { buffer: this.#gaussianBufs.sortedIndices } },
 
-				{ binding: 7, resource: { buffer: this.#gaussianBufs.rendered } },
-				{ binding: 8, resource: { buffer: this.#gaussianBufs.depths } },
-				{ binding: 9, resource: { buffer: this.#gaussianBufs.indices } }
+				{ binding: 8, resource: { buffer: this.#gaussianBufs.rendered } }
 			]
 		});
 
@@ -651,6 +678,36 @@ class Renderer
 			composite: compositeGroup
 		};
 	}
+
+	#shouldResort(view, time)
+	{
+		const lastView = this.#lastSortParams.view;
+
+		const viewDir = [ view[0 * 4 + 2], view[1 * 4 + 2], view[2 * 4 + 2] ];
+		const camPos  = [ view[3 * 4 + 0], view[3 * 4 + 1], view[3 * 4 + 2] ];
+
+		const lastViewDir = [ lastView[0 * 4 + 2], lastView[1 * 4 + 2], lastView[2 * 4 + 2] ];
+		const lastCamPos  = [ lastView[3 * 4 + 0], lastView[3 * 4 + 1], lastView[3 * 4 + 2] ];
+
+		const viewDiff = 1.0 - (
+			viewDir[0] * lastViewDir[0] + 
+			viewDir[1] * lastViewDir[1] +
+			viewDir[2] * lastViewDir[2]
+		);
+		const posDiff = (
+			Math.pow(camPos[0] - lastCamPos[0], 2.0) +
+			Math.pow(camPos[1] - lastCamPos[1], 2.0) +
+			Math.pow(camPos[2] - lastCamPos[2], 2.0)
+		);
+		const timeDiff = Math.abs(time - this.#lastSortParams.time);
+
+		return (
+			viewDiff > RESORT_DIR_CUTOFF ||
+			posDiff  > RESORT_POS_CUTOFF ||
+			timeDiff > RESORT_TIME_CUTOFF
+		);
+	}
+
 
 	#maybeReuseBuf(oldBuf, options)
 	{

@@ -50,7 +50,9 @@ struct Params
 	shMax: f32,
 
 	dynamic: u32,
-	time: f32
+	time: f32,
+
+	numGaussians: u32
 };
 
 struct RenderedGaussian
@@ -64,57 +66,24 @@ struct RenderedGaussian
 	center: vec2f
 };
 
-struct RenderedGaussians
-{
-	indirectIndexCount: u32,
-	numGaussians: atomic<u32>, //or indirectInstanceCount
-	indirectFirstIndex: u32,
-	indirectBaseVertex: u32,
-	indirectFirstInstance: u32,
-
-	gaussians: array<RenderedGaussian>
-};
-
 //-------------------------//
 
 @group(0) @binding(0) var<uniform> u_params: Params;
 
-@group(0) @binding(1) var<storage, read> u_means      : array<vec4f>;
-@group(0) @binding(2) var<storage, read> u_covariances: array<f32>;
-@group(0) @binding(3) var<storage, read> u_opacities  : array<u32>;
-@group(0) @binding(4) var<storage, read> u_colors     : array<u32>;
-@group(0) @binding(5) var<storage, read> u_shs        : array<u32>;
-@group(0) @binding(6) var<storage, read> u_velocities : array<vec4f>;
+@group(0) @binding(1) var<storage, read> u_means         : array<vec4f>;
+@group(0) @binding(2) var<storage, read> u_covariances   : array<f32>;
+@group(0) @binding(3) var<storage, read> u_opacities     : array<u32>;
+@group(0) @binding(4) var<storage, read> u_colors        : array<u32>;
+@group(0) @binding(5) var<storage, read> u_shs           : array<u32>;
+@group(0) @binding(6) var<storage, read> u_velocities    : array<vec4f>;
+@group(0) @binding(7) var<storage, read> u_sortedIndices : array<u32>;
 
-@group(0) @binding(7) var<storage, read_write> u_renderedGaussians: RenderedGaussians;
-@group(0) @binding(8) var<storage, read_write> u_gaussianDepths: array<u32>;
-@group(0) @binding(9) var<storage, read_write> u_gaussianIndices: array<u32>;
+@group(0) @binding(8) var<storage, read_write> u_renderedGaussians: array<RenderedGaussian>;
 
 var<workgroup> s_numGaussians: atomic<u32>;
 var<workgroup> s_writePosWorkgroup: u32;
 
 //-------------------------//
-
-fn f32_to_u32_ordered(x: f32) -> u32 
-{
-	let bits : u32 = bitcast<u32>(x);
-	let mask : u32 = select(0x80000000u, 0xFFFFFFFFu, x < 0.0);
-	return bits ^ mask;
-}
-
-fn f16_to_u32_ordered(x: f32) -> u32 
-{
-    // Pack x into the low 16 bits of a u32
-    let packed : u32 = pack2x16float(vec2<f32>(x, 0.0));
-    var bits   : u32 = packed & 0xFFFFu;
-
-    // Apply the ordering fix so that signed float16 values
-    // compare correctly when treated as unsigned ints
-    let mask : u32 = select(0x8000u, 0xFFFFu, x < 0.0);
-    bits = bits ^ mask;
-
-    return bits;
-}
 
 fn get_sh_coeffs(gaussianIdx: u32, i: u32) -> vec3f
 {
@@ -133,16 +102,14 @@ fn get_sh_coeffs(gaussianIdx: u32, i: u32) -> vec3f
 @compute @workgroup_size(WORKGROUP_SIZE) 
 fn preprocess(@builtin(global_invocation_id) GID: vec3u, @builtin(local_invocation_id) LID: vec3u)
 {
-	var culled = false;
-
 	//find clip pos of mean:
 	//---------------
-	var idx = GID.x;
-	if(idx >= arrayLength(&u_means))
+	let writeIdx = GID.x;
+	if(writeIdx >= u_params.numGaussians)
 	{
-		culled = true;
-		idx = arrayLength(&u_means) - 1;
+		return;
 	}
+	let idx = u_sortedIndices[writeIdx];
 
 	var mean = u_means[idx];
 	var velocity = vec4f(0.0);
@@ -154,15 +121,6 @@ fn preprocess(@builtin(global_invocation_id) GID: vec3u, @builtin(local_invocati
 
 	let camPos = u_params.view * vec4f(mean.xyz, 1.0);
 	let clipPos = u_params.proj * camPos;
-
-	//cull if outside of camera view:
-	//---------------
-	let clip = 1.2 * clipPos.w;
-	if(clipPos.x >  clip || clipPos.y >  clip || clipPos.z >  clip ||
-	   clipPos.x < -clip || clipPos.y < -clip || clipPos.z < -clip)
-	{
-		culled = true;
-	}
 
 	//unpack covariance matrix:
 	//---------------
@@ -203,11 +161,6 @@ fn preprocess(@builtin(global_invocation_id) GID: vec3u, @builtin(local_invocati
 
 	let lambda1 = midpoint + radius;
 	let lambda2 = midpoint - radius;
-
-	if(lambda2 < 0.0) //degenerate
-	{
-		culled = true;
-	}
 
 	let v1 = normalize(vec2f(cov2d[0][1], lambda1 - cov2d[0][0]));
 	let v2 = vec2f(v1.y, -v1.x);
@@ -275,47 +228,12 @@ fn preprocess(@builtin(global_invocation_id) GID: vec3u, @builtin(local_invocati
 		opacity *= opacityMult;
 	}
 
-	let rgba = clamp(clipPos.z / clipPos.w + 1.0, 0.0, 1.0) * vec4f(color, opacity);
-
-	//determine write position within global buffer:
-	//---------------
-	workgroupBarrier();
-
-	if(LID.x == 0u)
-	{
-		atomicStore(&s_numGaussians, 0u);
-	}
-
-	workgroupBarrier();
-
-	var writePosLocal = 0u;
-	if(!culled)
-	{
-		writePosLocal = atomicAdd(&s_numGaussians, 1u);
-	}
-
-	workgroupBarrier();
-
-	if(LID.x == 0u)
-	{
-		let numGaussians = atomicLoad(&s_numGaussians);
-		s_writePosWorkgroup = atomicAdd(&u_renderedGaussians.numGaussians, numGaussians);
-	}
-
-	workgroupBarrier();
-
-	let writePos = s_writePosWorkgroup + writePosLocal;
+	var rgba = clamp(clipPos.z / clipPos.w + 1.0, 0.0, 1.0) * vec4f(color, opacity);
 
 	//write:
 	//---------------
-	if(!culled)
-	{
-		u_renderedGaussians.gaussians[writePos].minor = minor;
-		u_renderedGaussians.gaussians[writePos].major = major;
-		u_renderedGaussians.gaussians[writePos].color = rgba;
-		u_renderedGaussians.gaussians[writePos].center = clipPos.xy / clipPos.w;
-
-		u_gaussianDepths [writePos] = ~f32_to_u32_ordered(camPos.z);
-		u_gaussianIndices[writePos] = writePos;
-	}
+	u_renderedGaussians[writeIdx].minor = minor;
+	u_renderedGaussians[writeIdx].major = major;
+	u_renderedGaussians[writeIdx].color = rgba;
+	u_renderedGaussians[writeIdx].center = clipPos.xy / clipPos.w;
 }

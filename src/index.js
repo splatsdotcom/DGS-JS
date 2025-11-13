@@ -3,10 +3,6 @@
  * contains the core logic
  */
 
-const CANVAS_RESOLUTION_SCALE = 2;
-
-//-------------------------//
-
 import MGSModule from './wasm/mgs.js'
 const MGS = await MGSModule();
 
@@ -47,14 +43,14 @@ export class SplatPlayer extends HTMLElement
 		this.#debugOverlay = document.createElement('div');
 		Object.assign(this.#debugOverlay.style, {
 			position: 'absolute',
-			top: '8px',
-			left: '8px',
+			top: '1%',
+			left: '1%',
 			color: 'white',
 			background: 'rgba(0,0,0,0.4)',
-			padding: '4px 8px',
+			padding: '16px 16px',
 			fontFamily: 'monospace',
-			fontSize: '12px',
-			borderRadius: '4px',
+			fontSize: '32px',
+			borderRadius: '16px',
 			backdropFilter: 'blur(6px)',
 			whiteSpace: 'pre',
 			pointerEvents: 'none',
@@ -67,7 +63,7 @@ export class SplatPlayer extends HTMLElement
 		const controls = document.createElement('div');
 		Object.assign(controls.style, {
 			position: 'absolute',
-			bottom: '10px',
+			bottom: '1%',
 			left: '50%',
 			transform: 'translateX(-50%)',
 			display: 'flex',
@@ -75,12 +71,11 @@ export class SplatPlayer extends HTMLElement
 			justifyContent: 'center',
 			gap: '10px',
 			background: 'rgba(0, 0, 0, 0.4)',
-			padding: '6px 12px',
-			borderRadius: '8px',
+			padding: '16px 11px',
+			borderRadius: '16px',
 			backdropFilter: 'blur(6px)',
 			boxSizing: 'border-box',
-			width: 'calc(100% - 20px)',
-			maxWidth: '600px',
+			width: '50%',
 			flexWrap: 'wrap',
 		});
 		container.appendChild(controls);
@@ -94,9 +89,9 @@ export class SplatPlayer extends HTMLElement
 			border: 'none',
 			background: 'transparent',
 			color: 'white',
-			fontSize: '24px',
+			fontSize: '48px',
 			cursor: 'pointer',
-			padding: '4px',
+			padding: '16px',
 			flexShrink: '0',
 		});
 		this.#playPauseBtn.addEventListener('click', () => {
@@ -164,8 +159,8 @@ export class SplatPlayer extends HTMLElement
 		//---------------
 		this.#resizeObserver = new ResizeObserver(entries => {
 			const entry = entries[0];
-			const width = entry.contentBoxSize[0].inlineSize * CANVAS_RESOLUTION_SCALE;
-			const height = entry.contentBoxSize[0].blockSize * CANVAS_RESOLUTION_SCALE;
+			const width = Math.round(entry.contentBoxSize[0].inlineSize * window.devicePixelRatio);
+			const height = Math.round(entry.contentBoxSize[0].blockSize * window.devicePixelRatio);
 
 			const canvas = entry.target;
 			canvas.width = width;
@@ -333,7 +328,7 @@ export class SplatPlayer extends HTMLElement
 	#videoTime = 0.0;
 	#curFrame = 0;
 	#isScrubbing = false;
-	#playing = true;
+	#playing = false;
 
 	#playPauseBtn = null;
 	#scrubber = null;
@@ -390,17 +385,12 @@ export class SplatPlayer extends HTMLElement
 
 		//update profiling display:
 		//---------------
-		if(profile) 
-		{
-			this.#debugOverlay.style.opacity = '1';
-			this.#debugOverlay.textContent = 
-				`Preprocess: ${profile.preprocessTime.toFixed(2)} ms\n` +
-				`Sort:       ${profile.sortTime.toFixed(2)} ms\n` +
-				`Raster:     ${profile.rasterTime.toFixed(2)} ms\n` +
-				`Total:      ${profile.totalTime.toFixed(2)} ms`;
-		}
-		else
-			this.#debugOverlay.style.opacity = '0';
+		this.#debugOverlay.style.opacity = '1';
+		this.#debugOverlay.textContent = 
+			`Frame Time: ${this.#formatProfile(profile.totalTime)}\n` +
+			`\t- Preprocess: ${this.#formatProfile(profile.preprocessTime)}\n` +
+			`\t- Raster:     ${this.#formatProfile(profile.rasterTime)}\n` +
+			`Last Sort Time: ${this.#formatProfile(profile.lastSortTime)}`;
 
 		//loop:
 		//---------------
@@ -426,6 +416,11 @@ export class SplatPlayer extends HTMLElement
 			throw new Error("Failed to fetch buffer at " + url);
 
 		return await response.arrayBuffer();
+	}
+
+	#formatProfile(x)
+	{
+		return (x?.toFixed(2) ?? 'N/A') + ' ms';
 	}
 }
 

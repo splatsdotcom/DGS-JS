@@ -8,6 +8,10 @@
 
 //-------------------------------------------//
 
+static mat4 parse_mat4(const emscripten::val& val);
+
+//-------------------------------------------//
+
 EMSCRIPTEN_BINDINGS(libmgs_js)
 {
 	emscripten::class_<mgs::GaussiansPacked>("Gaussians")
@@ -92,7 +96,49 @@ EMSCRIPTEN_BINDINGS(libmgs_js)
 
 			u8array.call<void>("set", memoryView);
 			return u8array;
+		}))
+
+		.function("cull_and_sort", emscripten::optional_override([](mgs::GaussiansPacked& self, const emscripten::val& viewVal, const emscripten::val& projVal, float time)
+		{
+			mat4 view = parse_mat4(viewVal);
+			mat4 proj = parse_mat4(projVal);
+
+			std::vector<uint32_t> indices = self.cull_and_sort(view, proj, time);
+
+			emscripten::val result = emscripten::val::global("Uint32Array").new_(indices.size());
+			emscripten::val memoryView = emscripten::val(emscripten::typed_memory_view(
+				indices.size(), indices.data()
+			));
+			result.call<void>("set", memoryView);
+
+			return result;
+		}))
+		
+		
+		.class_function("cull_and_sort_from_bufs", emscripten::optional_override([](const emscripten::val& meansVal, const emscripten::val& velocitiesVal, const emscripten::val& viewVal, const emscripten::val& projVal, float time)
+		{
+			std::vector<uint8_t> meansArray = emscripten::convertJSArrayToNumberVector<uint8_t>(meansVal);
+			std::vector<uint8_t> velocitiesArray = emscripten::convertJSArrayToNumberVector<uint8_t>(velocitiesVal);
+
+			if(meansArray.size() != velocitiesArray.size() || meansArray.size() % sizeof(vec4) != 0)
+				throw std::runtime_error("invalid means/velocities arrays");
+
+			uint32_t count = (uint32_t)(meansArray.size() / (sizeof(vec4)));
+
+			mat4 view = parse_mat4(viewVal);
+			mat4 proj = parse_mat4(projVal);
+
+			std::vector<uint32_t> indices = mgs::GaussiansPacked::cull_and_sort_from_bufs(count, (const vec4*)meansArray.data(), (const vec4*)velocitiesArray.data(), view, proj, time);
+
+			emscripten::val result = emscripten::val::global("Uint32Array").new_(indices.size());
+			emscripten::val memoryView = emscripten::val(emscripten::typed_memory_view(
+				indices.size(), indices.data()
+			));
+			result.call<void>("set", memoryView);
+
+			return result;
 		}));
+
 
 	emscripten::function("loadPly", emscripten::optional_override([](const emscripten::val& arg)
 	{
@@ -101,4 +147,18 @@ EMSCRIPTEN_BINDINGS(libmgs_js)
 
 		return std::make_shared<mgs::GaussiansPacked>(mgs::ply::load(data));
 	}));
+}
+
+//-------------------------------------------//
+
+static mat4 parse_mat4(const emscripten::val& val)
+{
+	std::vector<float> arr = emscripten::convertJSArrayToNumberVector<float>(val);
+	if(arr.size() != 16)
+		throw std::runtime_error("4x4 matrices must have 16 elements!");
+
+	mat4 mat;
+	std::memcpy(&mat, arr.data(), 16 * sizeof(float));
+
+	return mat;
 }
