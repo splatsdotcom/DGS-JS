@@ -64,7 +64,7 @@ class Renderer
 	draw(view, proj, time, profile = false)
 	{
 		if(!this.#gaussians)
-			return this.#latestProfile;
+			return;
 
 		if(this.#profiler == null)
 			profile = false;
@@ -248,8 +248,6 @@ class Renderer
 				}
 			});
 		}
-
-		return this.#latestProfile;
 	}
 
 	getPerformanceProfile()
