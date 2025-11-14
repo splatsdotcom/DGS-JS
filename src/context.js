@@ -1,7 +1,12 @@
 /* context.js
  *
- * initializes the WebGPU context
+ * initializes the WASM and WebGPU contexts
  */
+
+import MGSModule from './wasm/mgs.js'
+export const MGS = await MGSModule();
+
+//-------------------------//
 
 export const adapter = await navigator.gpu?.requestAdapter();
 
@@ -25,6 +30,6 @@ device?.lost.then((info) => {
 });
 
 if(!navigator.gpu)
-	console.warn('WebGPU not supported, you will be unable to create <splv-player> or <vv-player>');
+	console.warn('WebGPU not supported, you will be unable to create <splat-player>');
 else if(!adapter || !device)
 	throw new Error('WebGPU supported, but failed to create adapter or device!');
