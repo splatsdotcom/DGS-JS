@@ -3,9 +3,7 @@
  * contains the core logic
  */
 
-import MGSModule from './wasm/mgs.js'
-const MGS = await MGSModule();
-
+import { MGS } from './context.js';
 import Renderer from './renderer.js'
 import { DefaultCamera, SnapCamera, PortalCamera } from './camera.js';
 

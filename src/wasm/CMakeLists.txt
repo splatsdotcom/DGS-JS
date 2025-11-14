@@ -19,26 +19,28 @@ add_executable(${PROJECT_NAME} ${mgs_src})
 # set emscripten flags:
 # -----------------
 set_target_properties(${PROJECT_NAME} PROPERTIES COMPILE_FLAGS 
-	"-O3           \
+	"-O3          \
 	-flto         \
 	-msimd128     \
 	-msse2        \
 	-msse3        \
+	-pthread      \
 	-fexceptions"
 )
 set_target_properties(${PROJECT_NAME} PROPERTIES LINK_FLAGS 
-	"-s ENVIRONMENT=web,worker                                            \
-	 -s SINGLE_FILE=1                                                     \
-	 -s MODULARIZE=1                                                      \
-	 -s EXPORT_ES6=1                                                      \
-	 -s EXPORT_NAME=MGS                                                   \
-	 -s EXPORTED_FUNCTIONS=\"['_malloc', '_free']\"                       \
-	 -s EXPORTED_RUNTIME_METHODS=\"['HEAPU8', 'FS', 'IDBFS']\" \
-	 -s ALLOW_MEMORY_GROWTH                                               \
-	 -O3                                                                  \
-	 -flto                                                                \
-	 -fexceptions                                                         \
-	 -lidbfs.js                                                           \
+	"-s ENVIRONMENT=web,worker     \
+	 -s SINGLE_FILE=1              \
+	 -s MODULARIZE=1               \
+	 -s EXPORT_ES6=1               \
+	 -s EXPORT_NAME=MGS            \
+	 -s ALLOW_MEMORY_GROWTH        \
+	 -s SHARED_MEMORY=1            \
+	 -s PTHREAD_POOL_SIZE=4        \
+	 -s PTHREAD_POOL_SIZE_STRICT=2 \
+	 -O3                           \
+	 -pthread                      \
+	 -flto                         \
+	 -fexceptions                  \
 	 --bind"
 )
 

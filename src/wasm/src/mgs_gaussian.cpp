@@ -232,20 +232,26 @@ std::vector<uint8_t> GaussiansPacked::serialize() const
 	return data;
 }
 
-std::vector<uint32_t> GaussiansPacked::cull_and_sort(const mat4& view, const mat4& proj, float time) const
+GaussianSorter::GaussianSorter(const std::shared_ptr<GaussiansPacked>& gaussians) :
+	m_gaussians(gaussians), m_depths(gaussians->count)
 {
-	return cull_and_sort_from_bufs(count, means.data(), velocities.data(), view, proj, time);
+	
 }
 
-std::vector<uint32_t> GaussiansPacked::cull_and_sort_from_bufs(uint32_t count, const vec4* means, const vec4* velocities, const mat4& view, const mat4& proj, float time)
+void GaussianSorter::sort(const mat4& view, const mat4& proj, float time, bool isAsync)
 {
+	if(!isAsync && m_asyncThreadData.active) // if there is an async operation and it isnt this call
+		throw std::runtime_error("a background thread is already sorting");
+
+	//reset indices mem:
+	//---------------
+	m_indices.resize(0);
+
 	//compute depths + cull:
 	//---------------
-	std::vector<uint32_t> sortedIndices;
-	std::vector<float> depths(count);
-	for(uint32_t i = 0; i < count; i++)
+	for(uint32_t i = 0; i < m_gaussians->count; i++)
 	{
-		vec3 mean = means[i].xyz() + velocities[i].xyz() * time;
+		vec3 mean = m_gaussians->means[i].xyz() + m_gaussians->velocities[i].xyz() * time;
 		vec4 camPos = view * vec4(mean, 1.0);
 		vec4 clipPos = proj * camPos;
 
@@ -254,8 +260,8 @@ std::vector<uint32_t> GaussiansPacked::cull_and_sort_from_bufs(uint32_t count, c
 		   clipPos.x < -clip || clipPos.y < -clip || clipPos.z < -clip)
 			continue;
 
-		sortedIndices.push_back(i);
-		depths[i] = camPos.z;
+		m_indices.push_back(i);
+		m_depths[i] = camPos.z;
 	}
 
 	//sort:
@@ -265,13 +271,57 @@ std::vector<uint32_t> GaussiansPacked::cull_and_sort_from_bufs(uint32_t count, c
 	//TODO: multithread this + merge results !
 
 	std::sort(
-		sortedIndices.begin(), sortedIndices.end(),
-		[&depths](uint32_t a, uint32_t b) {
-			return depths[a] > depths[b];
+		m_indices.begin(), m_indices.end(),
+		[this](uint32_t a, uint32_t b) {
+			return m_depths[a] > m_depths[b];
 		}
 	);
+}
 
-	return sortedIndices;
+void GaussianSorter::sort_async_start(const mat4& view, const mat4& proj, float time)
+{
+	if(m_asyncThreadData.active)
+		throw std::runtime_error("a background thread is already sorting");
+
+	m_asyncThreadData.active = true;
+	m_asyncThreadData.view = view;
+	m_asyncThreadData.proj = proj;
+	m_asyncThreadData.time = time;
+	m_asyncThreadData.sorter = this;
+
+	if(pthread_create(&m_asyncThreadData.thread, nullptr, &GaussianSorter::start_async_thread, &m_asyncThreadData))
+		throw std::runtime_error("pthread_create failed");
+}
+
+bool GaussianSorter::sort_async_pending() const
+{
+	return m_asyncThreadData.active;
+}
+
+bool GaussianSorter::sort_async_tryjoin()
+{
+	if(!m_asyncThreadData.active)
+		throw std::runtime_error("no background thread is running");
+	
+	int joinResult = pthread_tryjoin_np(m_asyncThreadData.thread, nullptr);
+	if(joinResult == EBUSY)
+		return false;
+
+	m_asyncThreadData.active = false;
+	return true;
+}
+
+const std::vector<uint32_t>& GaussianSorter::get_latest() const
+{
+	return m_indices;
+}
+
+void* GaussianSorter::start_async_thread(void* arg)
+{
+	AsyncThreadData* data = static_cast<AsyncThreadData*>(arg);
+	data->sorter->sort(data->view, data->proj, data->time, true);
+
+	return nullptr;
 }
 
 }; //namespace mgs

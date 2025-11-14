@@ -16,7 +16,7 @@ const RESORT_TIME_CUTOFF = 0.0;
 //-------------------------//
 
 import { mat4, vec3 } from 'gl-matrix';
-import { adapter, device } from './context.js';
+import { MGS, adapter, device } from './context.js';
 
 import GAUSSIAN_PREPROCESS_SHADER_SRC from './shaders/gaussian_preprocess.wgsl?raw';
 import GAUSSIAN_RASTERIZE_SHADER_SRC  from './shaders/gaussian_rasterize.wgsl?raw';
@@ -37,7 +37,6 @@ class Renderer
 		this.#compositePipeline = this.#createCompositePipeline();
 		this.#geomBufs = this.#createGeometryBuffers();
 		this.#paramsBuf = this.#createParamsBuffer();
-		this.#sortWorker = this.#createSortWorker();
 
 		if(adapter.features.has('timestamp-query'))
 			this.#profiler = this.#createProfiler();
@@ -54,6 +53,7 @@ class Renderer
 		this.#gaussianBufs = this.#createGaussianBufs(this.#gaussians);
 
 		this.#lastSortParams = null; //TODO: allow you to give the gaussians presorted !
+		this.#sorter = new MGS.GaussianSorter(this.#gaussians);
 	}
 
 	setBackgroundColor(color)
@@ -74,32 +74,31 @@ class Renderer
 		if(this.#lastSortParams == null)
 		{
 			//need to sort synchronously if not already sorted
-			const sorted = this.#gaussians.cull_and_sort(view, proj, time);
-	
-			this.#numGaussiansVisible = sorted.length;
-			device.queue.writeBuffer(this.#gaussianBufs.sortedIndices, 0, sorted);
+			this.#sorter.sort(view, proj, time);
+			this.#uploadLatestSort();
 
 			this.#lastSortParams = {
 				view: view.slice(),
 				time: time
 			};
 		}
-		else if(this.#sortWorkerReady && this.#shouldResort(view, time) && !this.#sortPending) 
+		else if(this.#sorter.sortPending)
 		{
-			this.#sortPending = true;
+			if(this.#sorter.sortAsyncTryJoin())
+			{
+				this.#uploadLatestSort();
+				this.#latestProfile.lastSortTime = performance.now() - this.#sortStartTime;
+			}
+		}
+		else if(this.#shouldResort(view, time)) 
+		{
+			this.#sortStartTime = performance.now();
+			this.#sorter.sortAsyncStart(view, proj, time);
+
 			this.#lastSortParams = {
 				view: view.slice(),
 				time: time
 			};
-
-			this.#sortStartTime = performance.now();
-			this.#sortWorker.postMessage({
-				means: this.#gaussians.means.slice(),
-				velocities: this.#gaussians.velocities.slice(),
-				view: view.slice(),
-				proj: proj.slice(),
-				time: time
-			});
 		}
 
 		//get timing data:
@@ -273,9 +272,7 @@ class Renderer
 	#paramsBuf = null;
 	#numGaussiansVisible = 0;
 
-	#sortWorker = null;
-	#sortWorkerReady = false;
-	#sortPending = false;
+	#sorter = null;
 	#sortStartTime = null;
 	#lastSortParams = null;
 
@@ -491,30 +488,6 @@ class Renderer
 		});
 	}
 
-	#createSortWorker()
-	{
-		const worker = new Worker(new URL('./sort_worker.js', import.meta.url), { type: 'module' });
-		worker.onmessage = (e) => {
-			if(e.data.type === 'ready')
-				this.#sortWorkerReady = true;
-			else if(e.data.type === 'sort')
-			{
-				const sorted = e.data.sorted;
-				if(sorted)
-				{
-					this.#numGaussiansVisible = sorted.length;
-					device.queue.writeBuffer(this.#gaussianBufs.sortedIndices, 0, sorted);
-				}
-
-				this.#latestProfile.lastSortTime = performance.now() - this.#sortStartTime;
-			}
-
-			this.#sortPending = false;
-		};
-
-		return worker;
-	}
-
 	#createGaussianBufs(gaussians)
 	{
 		const renderedGaussianSize = 12 * SIZEOF_FLOAT32;
@@ -670,6 +643,8 @@ class Renderer
 		});
 
 		const compositeGroup = device.createBindGroup({
+			label: 'composite',
+
 			layout: this.#compositePipeline.getBindGroupLayout(0),
 			entries: [
 				{ binding: 0, resource: this.#finalTex.view },
@@ -713,11 +688,19 @@ class Renderer
 		);
 	}
 
+	#uploadLatestSort()
+	{
+		this.#numGaussiansVisible = this.#sorter.latest.length;
+		device.queue.writeBuffer(this.#gaussianBufs.sortedIndices, 0, this.#sorter.latest);
+	}
 
 	#maybeReuseBuf(oldBuf, options)
 	{
 		if(oldBuf == null || oldBuf.size < options.size)
+		{
+			oldBuf?.destroy();
 			return device.createBuffer(options);
+		}
 		else
 			return oldBuf;
 	}

@@ -6,14 +6,9 @@
 #ifndef MGS_GAUSSIAN_HPP
 #define MGS_GAUSSIAN_HPP
 
-#include <array>
-#include <vector>
-#include <thread>
-#include <atomic>
 #include <vector>
 #include <memory>
-#include <mutex>
-#include <optional>
+#include <pthread.h>
 
 #include "quickmath.hpp"
 using namespace qm;
@@ -77,9 +72,43 @@ struct GaussiansPacked
 	GaussiansPacked(const std::vector<uint8_t>& serialized);
 
 	std::vector<uint8_t> serialize() const;
+};
 
-	std::vector<uint32_t> cull_and_sort(const mat4& view, const mat4& proj, float time) const;
-	static std::vector<uint32_t> cull_and_sort_from_bufs(uint32_t count, const vec4* means, const vec4* velocities, const mat4& view, const mat4& proj, float time);
+/**
+ * performs culling and sorting on gaussians
+ */
+class GaussianSorter
+{
+public:
+	GaussianSorter(const std::shared_ptr<GaussiansPacked>& gaussians);
+
+	void sort(const mat4& view, const mat4& proj, float time, bool isAsync = false);
+	
+	void sort_async_start(const mat4& view, const mat4& proj, float time);
+	bool sort_async_pending() const;
+	bool sort_async_tryjoin();
+
+	const std::vector<uint32_t>& get_latest() const;
+
+private:
+	std::shared_ptr<GaussiansPacked> m_gaussians;
+
+	std::vector<float> m_depths;
+	std::vector<uint32_t> m_indices;
+
+	struct AsyncThreadData
+	{
+		bool active = false;
+		pthread_t thread;
+
+		mat4 view;
+		mat4 proj;
+		float time;
+
+		GaussianSorter* sorter;
+	} m_asyncThreadData;
+
+	static void* start_async_thread(void* arg);
 };
 
 }; //namespace mgs
