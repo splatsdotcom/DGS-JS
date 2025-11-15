@@ -35,7 +35,7 @@ set_target_properties(${PROJECT_NAME} PROPERTIES LINK_FLAGS
 	 -s EXPORT_NAME=MGS            \
 	 -s ALLOW_MEMORY_GROWTH        \
 	 -s SHARED_MEMORY=1            \
-	 -s PTHREAD_POOL_SIZE=4        \
+	 -s PTHREAD_POOL_SIZE=\"navigator.hardwareConcurrency + 2\"        \
 	 -s PTHREAD_POOL_SIZE_STRICT=2 \
 	 -O3                           \
 	 -pthread                      \

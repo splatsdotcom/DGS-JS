@@ -1,14 +1,88 @@
 #include "mgs_gaussian.hpp"
 
-#include <chrono>
 #include <iostream>
 #include <limits>
 #include <algorithm>
+#include <thread>
+#include <future>
 
 namespace mgs
 {
 
 #define MGS_GAUSSIAN_CLIP_THRESHHOLD 1.2f
+#define MGS_GAUSSIAN_MIN_SORT_SIZE 5000
+
+//-------------------------------------------//
+
+class ThreadPool 
+{
+public:
+	ThreadPool(size_t threadCount) : m_shouldStop(false) 
+	{
+		for(size_t i = 0; i < threadCount; i++)
+			m_workers.emplace_back([this]() { this->work_loop(); });
+	}
+
+	~ThreadPool() 
+	{
+		{
+			std::unique_lock<std::mutex> lock(m_workMutex);
+			m_shouldStop = true;
+		}
+		m_emptyCond.notify_all();
+
+		for(auto &w : m_workers) 
+			w.join();
+	}
+
+	template<class F>
+	auto submit(F&& f) -> std::future<decltype(f())>
+	{
+		using Ret = decltype(f());
+		auto task = std::make_shared<std::packaged_task<Ret()>>(std::forward<F>(f));
+
+		{
+			std::unique_lock<std::mutex> lock(m_workMutex);
+			m_tasks.emplace([task]() { (*task)(); });
+		}
+
+		m_emptyCond.notify_one();
+
+		return task->get_future();
+	}
+
+private:
+	std::vector<std::thread> m_workers;
+	std::queue<std::function<void()>> m_tasks;
+
+	std::mutex m_workMutex;
+	std::condition_variable m_emptyCond;
+	bool m_shouldStop;
+
+	void work_loop()
+	{
+		while(true)
+		{
+			std::function<void()> job;
+
+			{
+				std::unique_lock<std::mutex> lock(m_workMutex);
+
+				m_emptyCond.wait(lock, [&](){ return m_shouldStop || !m_tasks.empty(); });
+
+				if(m_shouldStop && m_tasks.empty())
+					return;
+
+				job = std::move(m_tasks.front());
+				m_tasks.pop();
+			}
+
+			job();
+		}
+	}
+};
+
+ThreadPool g_pool(std::thread::hardware_concurrency());
 
 //-------------------------------------------//
 
@@ -233,50 +307,186 @@ std::vector<uint8_t> GaussiansPacked::serialize() const
 }
 
 GaussianSorter::GaussianSorter(const std::shared_ptr<GaussiansPacked>& gaussians) :
-	m_gaussians(gaussians), m_depths(gaussians->count)
+	m_gaussians(gaussians)
 {
 	
 }
 
-void GaussianSorter::sort(const mat4& view, const mat4& proj, float time, bool isAsync)
+void GaussianSorter::sort(const mat4& view, const mat4& proj, float time,
+						  bool isAsync)
 {
-	if(!isAsync && m_asyncThreadData.active) // if there is an async operation and it isnt this call
+	//validate:
+	//-----------------
+	if(!isAsync && m_asyncThreadData.active)
 		throw std::runtime_error("a background thread is already sorting");
 
-	//reset indices mem:
-	//---------------
-	m_indices.resize(0);
+	//compute partition ranges:
+	//-----------------
+	uint32_t numParts = std::min<uint32_t>(
+		std::thread::hardware_concurrency(),
+		std::max<uint32_t>(1, m_gaussians->count / MGS_GAUSSIAN_MIN_SORT_SIZE)
+	);
 
-	//compute depths + cull:
-	//---------------
-	for(uint32_t i = 0; i < m_gaussians->count; i++)
+	std::vector<uint32_t> partStarts(numParts), partEnds(numParts);
+	uint32_t partSize = m_gaussians->count / numParts;
+	uint32_t partRemainder = m_gaussians->count % numParts;
+
+	for(uint32_t i = 0; i < numParts; i++) 
 	{
-		vec3 mean = m_gaussians->means[i].xyz() + m_gaussians->velocities[i].xyz() * time;
-		vec4 camPos = view * vec4(mean, 1.0);
-		vec4 clipPos = proj * camPos;
+		uint32_t num = partSize + (i < partRemainder ? 1 : 0);
+		uint32_t start = partSize * i + std::min(i, partRemainder);
 
-		float clip = MGS_GAUSSIAN_CLIP_THRESHHOLD * clipPos.w;
-		if(clipPos.x >  clip || clipPos.y >  clip || clipPos.z >  clip ||
-		   clipPos.x < -clip || clipPos.y < -clip || clipPos.z < -clip)
-			continue;
-
-		m_indices.push_back(i);
-		m_depths[i] = camPos.z;
+		partStarts[i] = start;
+		partEnds[i] = start + num;
 	}
 
-	//sort:
-	//---------------
+	//sort partitions in parallel:
+	//-----------------
+	std::vector<std::vector<std::pair<uint32_t,float>>> toSort(numParts);
 
-	//TODO: use a better algorithm !
-	//TODO: multithread this + merge results !
+	std::vector<std::future<void>> futures;
+	futures.reserve(numParts);
 
-	std::sort(
-		m_indices.begin(), m_indices.end(),
-		[this](uint32_t a, uint32_t b) {
-			return m_depths[a] > m_depths[b];
+	for(uint32_t i = 0; i < numParts; ++i) 
+	{
+		futures.emplace_back(g_pool.submit([&, i]() {
+			auto& local = toSort[i];
+			local.reserve(static_cast<size_t>(partEnds[i] - partStarts[i]));
+
+			for(uint32_t j = partStarts[i]; j < partEnds[i]; ++j) 
+			{
+				vec3 mean = m_gaussians->means[j].xyz() + m_gaussians->velocities[j].xyz() * time;
+
+				vec4 camPos  = view * vec4(mean, 1.0f);
+				vec4 clipPos = proj * camPos;
+
+				float clip = MGS_GAUSSIAN_CLIP_THRESHHOLD * clipPos.w;
+				if(clipPos.x >  clip || clipPos.y >  clip || clipPos.z >  clip ||
+				   clipPos.x < -clip || clipPos.y < -clip || clipPos.z < -clip)
+					continue;
+
+				local.emplace_back(j, camPos.z);
+			}
+
+			std::sort(
+				local.begin(), local.end(),
+				[](auto &a, auto &b){ return a.second > b.second; }
+			);
+		}));
+	}
+
+	for(auto& f: futures) 
+		f.get();
+
+	//compute total culled size:
+	//-----------------
+	size_t totalSize = 0;
+	size_t numNonemptyParts = 0;
+	for(auto& v: toSort) 
+	{
+		totalSize += v.size();
+		if(!v.empty()) 
+			numNonemptyParts++;
+	}
+
+	if(totalSize == 0) 
+	{
+		m_indices.clear();
+		return;
+	}
+
+	//perform a tree merge reduction:
+	//-----------------
+	auto mergeTwo = [](const std::vector<std::pair<uint32_t, float>>& a,
+					   const std::vector<std::pair<uint32_t, float>>& b,
+					   std::vector<std::pair<uint32_t, float>>& out)
+	{
+		out.clear();
+		out.reserve(a.size() + b.size());
+
+		size_t i = 0, j = 0;
+		while(i < a.size() && j < b.size()) 
+		{
+			if(a[i].second > b[j].second) 
+				out.push_back(a[i++]);
+			else 
+				out.push_back(b[j++]);
 		}
-	);
+
+		while(i < a.size()) 
+			out.push_back(a[i++]);
+		while(j < b.size()) 
+			out.push_back(b[j++]);
+	};
+
+	std::vector<std::vector<std::pair<uint32_t, float>>> toMerge;
+	toMerge.reserve(numParts);
+
+	for(auto& v: toSort) 
+		if(!v.empty()) 
+			toMerge.push_back(std::move(v));
+
+	while(toMerge.size() > 2) 
+	{
+		size_t activeCount = toMerge.size();
+		size_t nextCount = (activeCount + 1) / 2;
+		std::vector<std::vector<std::pair<uint32_t, float>>> next;
+		next.resize(nextCount);
+
+		std::vector<std::future<void>> mergeFutures;
+		mergeFutures.reserve(activeCount / 2);
+
+		for(size_t i = 0; i < activeCount; i += 2) 
+		{
+			size_t outIdx = i / 2;
+			if(i + 1 == activeCount) 
+				next[outIdx] = std::move(toMerge[i]);
+			else 
+			{
+				mergeFutures.emplace_back(g_pool.submit([&, l = i, r = i + 1, out = outIdx]() {
+					mergeTwo(toMerge[l], toMerge[r], next[out]);
+				}));
+			}
+		}
+
+		for(auto &mf: mergeFutures) 
+			mf.get();
+
+		toMerge.swap(next);
+	}
+
+	//merge final 2 arrays into out indices:
+	//-----------------
+	if(toMerge.size() == 1)
+	{
+		auto &v = toMerge[0];
+		m_indices.resize(v.size());
+		for(size_t k = 0; k < v.size(); k++)
+			m_indices[k] = v[k].first;
+	}
+	else
+	{
+		auto& a = toMerge[0];
+		auto& b = toMerge[1];
+
+		m_indices.resize(a.size() + b.size());
+
+		size_t i = 0, j = 0, out = 0;
+		while(i < a.size() && j < b.size())
+		{
+			if(a[i].second > b[j].second)
+				m_indices[out++] = a[i++].first;
+			else
+				m_indices[out++] = b[j++].first;
+		}
+
+		while(i < a.size()) 
+			m_indices[out++] = a[i++].first;
+		while(j < b.size()) 
+			m_indices[out++] = b[j++].first;
+	}
 }
+
 
 void GaussianSorter::sort_async_start(const mat4& view, const mat4& proj, float time)
 {
