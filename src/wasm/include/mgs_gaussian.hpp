@@ -92,8 +92,6 @@ public:
 
 private:
 	std::shared_ptr<GaussiansPacked> m_gaussians;
-
-	std::vector<float> m_depths;
 	std::vector<uint32_t> m_indices;
 
 	struct AsyncThreadData
