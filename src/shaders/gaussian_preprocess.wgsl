@@ -5,6 +5,8 @@
 
 override WORKGROUP_SIZE: u32;
 
+const CLIP_THRESHHOLD = 1.2;
+
 const MAX_SH_DEGREE = 3u;
 const MAX_SH_COEFFS = (3 * (MAX_SH_DEGREE + 1) * (MAX_SH_DEGREE + 1));
 const MAX_SH_COEFFS_REST = (MAX_SH_COEFFS - 3); //not including dc coeffs
@@ -229,6 +231,10 @@ fn preprocess(@builtin(global_invocation_id) GID: vec3u, @builtin(local_invocati
 	}
 
 	var rgba = clamp(clipPos.z / clipPos.w + 1.0, 0.0, 1.0) * vec4f(color, opacity);
+	if(clipPos.z < -CLIP_THRESHHOLD * clipPos.w) //to gaussians rendering behind the camera when cpu culling is slow
+	{
+		rgba = vec4f(0.0);
+	}
 
 	//write:
 	//---------------
