@@ -355,7 +355,9 @@ void GaussianSorter::sort(const mat4& view, const mat4& proj, float time,
 
 			for(uint32_t j = partStarts[i]; j < partEnds[i]; ++j) 
 			{
-				vec3 mean = m_gaussians->means[j].xyz() + m_gaussians->velocities[j].xyz() * time;
+				vec3 mean = m_gaussians->means[j].xyz();
+				if(m_gaussians->dynamic)
+					mean = mean + m_gaussians->velocities[j].xyz() * time;
 
 				vec4 camPos  = view * vec4(mean, 1.0f);
 				vec4 clipPos = proj * camPos;
