@@ -235,13 +235,15 @@ GaussiansPacked::GaussiansPacked(const std::vector<uint8_t>& serialized)
 
 	//read header:
 	//-----------------
-	read(&shDegree, sizeof(uint32_t));
-	read(&dynamic, sizeof(bool));
 	read(&count, sizeof(uint32_t));
-	read(&colorMax, sizeof(float));
+	read(&dynamic, sizeof(bool));
+
+	read(&shDegree, sizeof(uint32_t));
+	
 	read(&colorMin, sizeof(float));
-	read(&shMax, sizeof(float));
+	read(&colorMax, sizeof(float));
 	read(&shMin, sizeof(float));
+	read(&shMax, sizeof(float));
 
 	uint32_t numShCoeff = (shDegree + 1) * (shDegree + 1) - 1;
 	
@@ -256,9 +258,9 @@ GaussiansPacked::GaussiansPacked(const std::vector<uint8_t>& serialized)
 
 	read_vector(means, count);
 	read_vector(covariances, count * 6);
-	read_vector(opacities, align(count, 4));
-	read_vector(colors, align(count * 3, 2));
-	read_vector(shs, align(count * numShCoeff * 3, 4));
+	read_vector(opacities, count);
+	read_vector(colors, count * 3);
+	read_vector(shs, count * numShCoeff * 3);
 	if(dynamic)
 		read_vector(velocities, count);
 
@@ -280,13 +282,15 @@ std::vector<uint8_t> GaussiansPacked::serialize() const
 		std::memcpy(data.data() + offset, src, size);
 	};
 
-	append(&shDegree, sizeof(shDegree));
-	append(&dynamic, sizeof(dynamic));
 	append(&count, sizeof(count));
-	append(&colorMax, sizeof(colorMax));
+	append(&dynamic, sizeof(dynamic));
+
+	append(&shDegree, sizeof(shDegree));
+	
 	append(&colorMin, sizeof(colorMin));
-	append(&shMax, sizeof(shMax));
+	append(&colorMax, sizeof(colorMax));
 	append(&shMin, sizeof(shMin));
+	append(&shMax, sizeof(shMax));
 
 	//write data:
 	//-----------------

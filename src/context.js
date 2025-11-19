@@ -8,7 +8,9 @@ export const MGS = await MGSModule();
 
 //-------------------------//
 
-export const adapter = await navigator.gpu?.requestAdapter();
+export const adapter = await navigator.gpu?.requestAdapter({
+	powerPreference: 'high-performance'
+});
 
 const limits = adapter?.limits;
 const features = adapter?.features;
