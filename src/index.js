@@ -385,7 +385,7 @@ export class SplatPlayer extends HTMLElement
 		//---------------
 		const profile = this.#renderer.getPerformanceProfile();
 
-		this.#debugOverlay.style.opacity = '1';
+		this.#debugOverlay.style.opacity = this.#debug ? '1' : '0';
 		this.#debugOverlay.textContent = 
 			`Frame Time: ${this.#formatProfile(profile.totalTime)}\n` +
 			`\t- Preprocess: ${this.#formatProfile(profile.preprocessTime)}\n` +
