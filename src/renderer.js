@@ -511,31 +511,31 @@ class Renderer
 		const opacitiesBuf = this.#maybeReuseBuf(this.#gaussianBufs?.opacities, {
 			label: 'opacities',
 
-			size: gaussians.opacities.byteLength,
+			size: this.#alignNonzero(gaussians.opacities.byteLength, SIZEOF_UINT32),
 			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
 		});
-		device.queue.writeBuffer(opacitiesBuf, 0, gaussians.opacities);
+		this.#writeBufferUnaligned(opacitiesBuf, gaussians.opacities);
 
 		const colorsBuf = this.#maybeReuseBuf(this.#gaussianBufs?.colors, {
 			label: 'colors',
 
-			size: gaussians.colors.byteLength,
+			size: this.#alignNonzero(gaussians.colors.byteLength, SIZEOF_UINT32),
 			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
 		});
-		device.queue.writeBuffer(colorsBuf, 0, gaussians.colors);
+		this.#writeBufferUnaligned(colorsBuf, gaussians.colors);
 
 		const shsBuf = this.#maybeReuseBuf(this.#gaussianBufs?.shs, {
 			label: 'spherical harmomics',
 
-			size: Math.max(gaussians.shs.byteLength, 4),
+			size: this.#alignNonzero(gaussians.shs.byteLength, SIZEOF_UINT32),
 			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
 		});
-		device.queue.writeBuffer(shsBuf, 0, gaussians.shs);
+		this.#writeBufferUnaligned(shsBuf, gaussians.shs);
 
 		const velocitiesBuf = this.#maybeReuseBuf(this.#gaussianBufs?.velocities, {
 			label: 'velocities',
 
-			size: Math.max(gaussians.velocities.byteLength, 16),
+			size: Math.max(gaussians.velocities.byteLength, 4 * SIZEOF_FLOAT32),
 			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
 		});
 		device.queue.writeBuffer(velocitiesBuf, 0, gaussians.velocities);
@@ -703,6 +703,44 @@ class Renderer
 		}
 		else
 			return oldBuf;
+	}
+
+	#writeBufferUnaligned(dst, src) 
+	{
+		let buffer, byteOffset, byteLength;
+		if(src instanceof ArrayBuffer) 
+		{
+			buffer = src;
+			byteOffset = 0;
+			byteLength = src.byteLength;
+		} 
+		else 
+		{
+			buffer = src.buffer;
+			byteOffset = src.byteOffset;
+			byteLength = src.byteLength;
+		}
+
+		const alignedLength = byteLength & ~3;
+		if(alignedLength > 0) 
+			device.queue.writeBuffer(dst, 0, buffer, byteOffset, alignedLength);
+
+		const tail = byteLength - alignedLength;
+		if(tail > 0) 
+		{
+			const scratch = new Uint8Array(4);
+			scratch.set(new Uint8Array(buffer, byteOffset + alignedLength, tail));
+
+			device.queue.writeBuffer(dst, alignedLength, scratch, 0, 4);
+		}
+	}
+
+	#alignNonzero(a, b)
+	{
+		if(a == 0)
+			return b;
+
+		return (a + b - 1) & ~(b - 1);
 	}
 }
 
