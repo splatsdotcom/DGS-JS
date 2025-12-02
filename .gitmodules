@@ -1,3 +1,3 @@
-[submodule "src/wasm/external/QuickMathHPP"]
-	path = src/wasm/external/QuickMathHPP
-	url = git@github.com:frozein/QuickMathHPP.git
+[submodule "src/wasm/external/MGS"]
+	path = src/wasm/external/MGS
+	url = git@github.com:True3DLabs/MGS.git

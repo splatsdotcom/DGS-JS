@@ -3,154 +3,151 @@
 #include <memory>
 #include <iostream>
 
-#include "mgs_gaussian.hpp"
-#include "mgs_ply.hpp"
+#include "mgs_sorter.hpp"
+#include "mgs_decode.h"
 
 //-------------------------------------------//
 
-static mat4 parse_mat4(const emscripten::val& val);
+static QMmat4 parse_mat4(const emscripten::val& val);
 
 //-------------------------------------------//
 
 EMSCRIPTEN_BINDINGS(libmgs_js)
 {
-	emscripten::class_<mgs::GaussiansPacked>("Gaussians")
-		.smart_ptr<std::shared_ptr<mgs::GaussiansPacked>>("Gaussians")
+	emscripten::class_<MGSgaussians>("Gaussians")
+		.smart_ptr<std::shared_ptr<MGSgaussians>>("Gaussians")
 
 		.constructor(emscripten::optional_override([]()
 		{
-			return std::make_shared<mgs::GaussiansPacked>(mgs::Gaussians());
+			auto gaussians = std::make_shared<MGSgaussians>();
+			std::memset(gaussians.get(), 0, sizeof(MGSgaussians));
+
+			return gaussians;
 		}))
 
-		.constructor(emscripten::optional_override([](const emscripten::val& arg)
-		{
-			emscripten::val bufView = emscripten::val::global("Uint8Array").new_(arg);
-			std::vector<uint8_t> data = emscripten::convertJSArrayToNumberVector<uint8_t>(bufView);
+    	.property("length", &MGSgaussians::count)
+    	.property("shDegree", &MGSgaussians::shDegree)
+    	.property("dynamic", &MGSgaussians::dynamic)
+    	.property("colorMin", &MGSgaussians::colorMin)
+    	.property("colorMax", &MGSgaussians::colorMax)
+    	.property("shMin", &MGSgaussians::shMin)
+    	.property("shMax", &MGSgaussians::shMax)
 
-			return std::make_shared<mgs::GaussiansPacked>(data);
-		}))
-
-    	.property("length", &mgs::GaussiansPacked::count)
-    	.property("shDegree", &mgs::GaussiansPacked::shDegree)
-    	.property("dynamic", &mgs::GaussiansPacked::dynamic)
-    	.property("colorMin", &mgs::GaussiansPacked::colorMin)
-    	.property("colorMax", &mgs::GaussiansPacked::colorMax)
-    	.property("shMin", &mgs::GaussiansPacked::shMin)
-    	.property("shMax", &mgs::GaussiansPacked::shMax)
-
-		.property("means", emscripten::optional_override([](const mgs::GaussiansPacked& self)
+		.property("means", emscripten::optional_override([](const MGSgaussians& self)
 		{
 			return emscripten::val(emscripten::typed_memory_view(
-				self.means.size() * sizeof(vec4), 
-				(const uint8_t*)self.means.data()
+				self.count * 4, 
+				(const float*)self.means
 			));
 		}))
 
-		.property("covariances", emscripten::optional_override([](const mgs::GaussiansPacked& self)
+		.property("covariances", emscripten::optional_override([](const MGSgaussians& self)
 		{
 			return emscripten::val(emscripten::typed_memory_view(
-				self.covariances.size() * sizeof(float), 
-				(const uint8_t*)self.covariances.data()
+				self.count * 6, 
+				(const float*)self.covariances
 			));
 		}))
 
-		.property("opacities", emscripten::optional_override([](const mgs::GaussiansPacked& self)
+		.property("opacities", emscripten::optional_override([](const MGSgaussians& self)
 		{
 			return emscripten::val(emscripten::typed_memory_view(
-				self.opacities.size() * sizeof(uint8_t), 
-				(const uint8_t*)self.opacities.data()
+				self.count, 
+				(const uint8_t*)self.opacities
 			));
 		}))
 
-		.property("colors", emscripten::optional_override([](const mgs::GaussiansPacked& self)
+		.property("colors", emscripten::optional_override([](const MGSgaussians& self)
 		{
 			return emscripten::val(emscripten::typed_memory_view(
-				self.colors.size() * sizeof(uint16_t), 
-				(const uint8_t*)self.colors.data()
+				self.count * 3, 
+				(const uint16_t*)self.colors
 			));
 		}))
 
-		.property("shs", emscripten::optional_override([](const mgs::GaussiansPacked& self)
+		.property("shs", emscripten::optional_override([](const MGSgaussians& self)
+		{
+			uint32_t numShCoeffs = (self.shDegree + 1) * (self.shDegree + 1) - 1;
+
+			return emscripten::val(emscripten::typed_memory_view(
+				numShCoeffs * 3, 
+				(const uint8_t*)self.shs
+			));
+		}))
+
+		.property("velocities", emscripten::optional_override([](const MGSgaussians& self)
 		{
 			return emscripten::val(emscripten::typed_memory_view(
-				self.shs.size() * sizeof(uint8_t), 
-				(const uint8_t*)self.shs.data()
+				self.dynamic ? self.count * 4 : 0, 
+				(const float*)self.velocities
 			));
-		}))
-
-		.property("velocities", emscripten::optional_override([](const mgs::GaussiansPacked& self)
-		{
-			return emscripten::val(emscripten::typed_memory_view(
-				self.velocities.size() * sizeof(vec4), 
-				(const uint8_t*)self.velocities.data()
-			));
-		}))
-
-		.function("serialize", emscripten::optional_override([](const mgs::GaussiansPacked& self) 
-		{
-			std::vector<uint8_t> data = self.serialize();
-			emscripten::val u8array = emscripten::val::global("Uint8Array").new_(data.size());
-			emscripten::val memoryView = emscripten::val(emscripten::typed_memory_view(
-				data.size(), data.data()
-			));
-
-			u8array.call<void>("set", memoryView);
-			return u8array;
 		}));
 
-	emscripten::class_<mgs::GaussianSorter>("GaussianSorter")
-		.smart_ptr<std::shared_ptr<mgs::GaussianSorter>>("GaussianSorter")
+	emscripten::class_<mgs::Sorter>("Sorter")
+		.smart_ptr<std::shared_ptr<mgs::Sorter>>("Sorter")
 
-		.constructor(emscripten::optional_override([](const std::shared_ptr<mgs::GaussiansPacked>& gaussians)
+		.constructor(emscripten::optional_override([](const std::shared_ptr<MGSgaussians>& gaussians)
 		{
-			return std::make_shared<mgs::GaussianSorter>(gaussians);
+			return std::make_shared<mgs::Sorter>(gaussians);
 		}))
 
-		.function("sort", emscripten::optional_override([](mgs::GaussianSorter& self, const emscripten::val& viewVal, const emscripten::val& projVal, float time)
+		.function("sort", emscripten::optional_override([](mgs::Sorter& self, const emscripten::val& viewVal, const emscripten::val& projVal, float time)
 		{
-			mat4 view = parse_mat4(viewVal);
-			mat4 proj = parse_mat4(projVal);
+			QMmat4 view = parse_mat4(viewVal);
+			QMmat4 proj = parse_mat4(projVal);
 
 			self.sort(view, proj, time);
 		}))
 		
-		.function("sortAsyncStart", emscripten::optional_override([](mgs::GaussianSorter& self, const emscripten::val& viewVal, const emscripten::val& projVal, float time)
+		.function("sortAsyncStart", emscripten::optional_override([](mgs::Sorter& self, const emscripten::val& viewVal, const emscripten::val& projVal, float time)
 		{
-			mat4 view = parse_mat4(viewVal);
-			mat4 proj = parse_mat4(projVal);
+			QMmat4 view = parse_mat4(viewVal);
+			QMmat4 proj = parse_mat4(projVal);
 
 			self.sort_async_start(view, proj, time);
 		}))
 
-		.property("sortPending", &mgs::GaussianSorter::sort_async_pending)
+		.property("sortPending", &mgs::Sorter::sort_async_pending)
 		
-		.function("sortAsyncTryJoin", &mgs::GaussianSorter::sort_async_tryjoin)
+		.function("sortAsyncTryJoin", &mgs::Sorter::sort_async_tryjoin)
 
-		.property("latest", emscripten::optional_override([](const mgs::GaussianSorter& self)
+		.property("latest", emscripten::optional_override([](const mgs::Sorter& self)
 		{
 			return emscripten::val(emscripten::typed_memory_view(
 				self.get_latest().size(), self.get_latest().data()
 			));
 		}));
 
-	emscripten::function("loadPly", emscripten::optional_override([](const emscripten::val& arg)
+	emscripten::function("decode", emscripten::optional_override([](const emscripten::val& arg)
 	{
 		emscripten::val bufView = emscripten::val::global("Uint8Array").new_(arg);
-		std::vector<uint8_t> data = emscripten::convertJSArrayToNumberVector<std::uint8_t>(bufView);
+		std::vector<uint8_t> data = emscripten::convertJSArrayToNumberVector<uint8_t>(bufView);
 
-		return std::make_shared<mgs::GaussiansPacked>(mgs::ply::load(data));
+		auto gaussians = std::shared_ptr<MGSgaussians>(
+			new MGSgaussians(),
+			[](MGSgaussians* p) {
+				mgs_gaussians_free(p);
+				delete p;
+			}
+		);
+
+		MGSerror error = mgs_decode_from_buffer(data.size(), data.data(), gaussians.get());
+		if(error != MGS_SUCCESS)
+			throw std::runtime_error("MGS internal error");
+
+		return gaussians;
 	}));
 }
 
 //-------------------------------------------//
 
-static mat4 parse_mat4(const emscripten::val& val)
+static QMmat4 parse_mat4(const emscripten::val& val)
 {
 	std::vector<float> arr = emscripten::convertJSArrayToNumberVector<float>(val);
 	if(arr.size() != 16)
 		throw std::runtime_error("4x4 matrices must have 16 elements!");
 
-	mat4 mat;
+	QMmat4 mat;
 	std::memcpy(&mat, arr.data(), 16 * sizeof(float));
 
 	return mat;

@@ -17,23 +17,23 @@
   </style>
 </head>
 <body>
-  <splat-player debug="on" src-gs="output.mgs"></splat-player>
+  <splat-player debug="on"></splat-player>
   <script type="module">
     import "../src/index.js";
 
-    /*let bufs = [];
+    let bufs = [];
     for(let i = 0; i < 25; i++)
     {
-      const response = await fetch(`fashion_diff_gs/${i}.gs`);
+      const response = await fetch(`fashion/${i}.mgs`);
       if(!response.ok)
         throw new Error("Failed to fetch buffer at ");
 
       bufs.push(await response.arrayBuffer());
-    }*/
+    }
 
-  const player = document.querySelector('splat-player');
+    const player = document.querySelector('splat-player');
+    player.setSequenceGS(bufs, 11.0 / 25.0);
   // player.setBackgroundColor([1.0,1.0,1.])
-  // player.setSequenceGS(bufs, 11.0 / 25.0);
         /*player.setCamera('snap', {
           // minRadius: 0.125,
           // maxRadius: 0.3,

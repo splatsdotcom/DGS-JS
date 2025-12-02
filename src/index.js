@@ -191,6 +191,7 @@ export class SplatPlayer extends HTMLElement
 		return [
 			'src-ply',
 			'src-gs', 
+			'src-mgs', 
 			'camera',
 			'debug'
 		];
@@ -206,12 +207,13 @@ export class SplatPlayer extends HTMLElement
 		case 'src-ply':
 			this.#fetchBuf(newValue).then((buf) => {
 				this.setPLY(buf);
-			})
+			});
 			break;
 		case 'src-gs':
+		case 'src-mgs':
 			this.#fetchBuf(newValue).then((buf) => {
-				this.setGS(buf);
-			})
+				this.setMGS(buf);
+			});
 			break;
 		case 'camera':
 		{
@@ -242,17 +244,19 @@ export class SplatPlayer extends HTMLElement
 
 	setPLY(buf)
 	{
-		this.#frames = [ MGS.loadPly(buf) ];
+		throw new Error("PLY loading not yet implemented");
+
+		/*this.#frames = [ MGS.loadPly(buf) ];
 		this.#timePerFrame = 1.0;
 		this.#curFrame = -1;
 		this.#videoTime = 0.0;
 
-		this.#updateScrubberRange();
+		this.#updateScrubberRange();*/
 	}
 
-	setGS(buf)
+	setMGS(buf)
 	{
-		this.#frames = [ new MGS.Gaussians(buf) ];
+		this.#frames = [ MGS.decode(buf) ];
 		this.#timePerFrame = 1.0;
 		this.#curFrame = -1;
 		this.#videoTime = 0.0;
@@ -262,7 +266,9 @@ export class SplatPlayer extends HTMLElement
 
 	setSequencePLY(bufs, timePerFrame)
 	{
-		if(timePerFrame === undefined)
+		throw new Error("PLY loading not yet implemented");
+
+		/*if(timePerFrame === undefined)
 			throw new Error('Must providea a framerate to setSequencePLY');
 
 		this.#frames = bufs.map(b => MGS.loadPly(b));
@@ -270,7 +276,7 @@ export class SplatPlayer extends HTMLElement
 		this.#curFrame = -1;
 		this.#videoTime = 0.0;
 
-		this.#updateScrubberRange();
+		this.#updateScrubberRange();*/
 	}
 
 	setSequenceGS(bufs, timePerFrame)
@@ -278,7 +284,7 @@ export class SplatPlayer extends HTMLElement
 		if(timePerFrame === undefined)
 			throw new Error('Must providea a framerate to setSequenceGS');
 
-		this.#frames = bufs.map(b => new MGS.Gaussians(b));
+		this.#frames = bufs.map(b => MGS.decode(b));
 		this.#timePerFrame = timePerFrame;
 		this.#curFrame = -1;
 		this.#videoTime = 0.0;
