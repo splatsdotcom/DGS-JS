@@ -7,14 +7,23 @@ project(mgs VERSION 1.0)
 # find source files:
 # -----------------
 set(mgs_src
-	"src/mgs_gaussian.cpp"
-	"src/mgs_ply.cpp"
+	"src/mgs_sorter.cpp"
 	"src/mgs_emscripten_bindings.cpp"
+
+	"external/MGS/csrc/src/mgs_error.c"
+	"external/MGS/csrc/src/mgs_gaussians.c"
+	"external/MGS/csrc/src/mgs_encode.c"
+	"external/MGS/csrc/src/mgs_decode.c"
 )
 
 # create executable:
 # -----------------
 add_executable(${PROJECT_NAME} ${mgs_src})
+
+include_directories(${PROJECT_NAME}
+	"external/MGS/csrc/include"
+	"external/MGS/csrc/external"
+)
 
 # set emscripten flags:
 # -----------------
@@ -49,6 +58,7 @@ set_target_properties(${PROJECT_NAME} PROPERTIES LINK_FLAGS
 include_directories(
 	"${CMAKE_CURRENT_SOURCE_DIR}/include" 
 	"${CMAKE_CURRENT_SOURCE_DIR}/external/QuickMathHPP" 
+	"${CMAKE_CURRENT_SOURCE_DIR}/external/MGS/csrc/include" 
 )
 target_link_libraries(${PROJECT_NAME})
 

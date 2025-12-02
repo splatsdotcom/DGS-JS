@@ -52,8 +52,10 @@ class Renderer
 		this.#gaussians = gaussians;
 		this.#gaussianBufs = this.#createGaussianBufs(this.#gaussians);
 
+		this.#sorter?.delete();
+
 		this.#lastSortParams = null; //TODO: allow you to give the gaussians presorted !
-		this.#sorter = new MGS.GaussianSorter(this.#gaussians);
+		this.#sorter = new MGS.Sorter(this.#gaussians);
 	}
 
 	setBackgroundColor(color)
