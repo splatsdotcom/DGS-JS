@@ -223,7 +223,7 @@ fn preprocess(@builtin(global_invocation_id) GID: vec3u, @builtin(local_invocati
 
 	let opacityRead = (u_opacities[idx / 4] >> ((idx % 4) * 8)) & 0xFF;
 	var opacity = f32(opacityRead) / 0xFF;
-	if(u_params.dynamic != 0)
+	if(u_params.dynamic != 0 && velocity.w > 0.0)
 	{
 		let tOffset = u_params.time - mean.w;
 		let opacityMult = exp(-tOffset * tOffset / (2.0 * velocity.w * velocity.w));
