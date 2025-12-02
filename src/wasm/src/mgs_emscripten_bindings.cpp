@@ -133,9 +133,20 @@ EMSCRIPTEN_BINDINGS(libmgs_js)
 
 		MGSerror error = mgs_decode_from_buffer(data.size(), data.data(), gaussians.get());
 		if(error != MGS_SUCCESS)
-			throw std::runtime_error("MGS internal error");
+			throw std::runtime_error("MGS internal error: \"" + std::string(mgs_error_get_description(error)) + "\"");
 
 		return gaussians;
+	}));
+
+	emscripten::function("combine", emscripten::optional_override([](const std::shared_ptr<MGSgaussians>& g1, const std::shared_ptr<MGSgaussians>& g2)
+	{
+		std::shared_ptr<MGSgaussians> out = std::make_shared<MGSgaussians>();
+
+		MGSerror error = mgs_gaussians_combine(g1.get(), g2.get(), out.get());
+		if(error != MGS_SUCCESS)
+			throw std::runtime_error("MGS internal error: \"" + std::string(mgs_error_get_description(error)) + "\"");
+
+		return out;
 	}));
 }
 
