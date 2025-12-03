@@ -65,12 +65,7 @@ class Renderer
 		this.#scene = gaussians;
 	}
 
-	setBackgroundColor(color)
-	{
-		this.#backgroundColor = color;
-	}
-
-	draw(view, proj, time, profile = false)
+	draw(view, proj, time, params = {}, profile = false)
 	{
 		if(!this.#gaussians)
 			return;
@@ -199,11 +194,12 @@ class Renderer
 
 		//composite:
 		//---------------
+		const backgroundColor = params.backgroundColor ?? [0, 0, 0];
 		const compositePass = encoder.beginRenderPass({
 			label: 'composite',
 			colorAttachments: [{
 				view: this.#context.getCurrentTexture().createView(),
-				clearValue: { r: this.#backgroundColor[0], g: this.#backgroundColor[1], b: this.#backgroundColor[2], a: 1.0 },
+				clearValue: { r: backgroundColor[0], g: backgroundColor[1], b: backgroundColor[2], a: 1.0 },
 				loadOp: 'clear',
 				storeOp: 'store'
 			}]
@@ -273,9 +269,7 @@ class Renderer
 	#compositePipeline = null;
 	#profiler = null;
 
-	#backgroundColor = [0.0, 0.0, 0.0];
 	#scene = null;
-
 	#gaussians = null;
 	#gaussianBufs = null;
 	#geomBufs = null;

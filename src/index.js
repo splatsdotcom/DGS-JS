@@ -239,9 +239,9 @@ export class SplatPlayer extends HTMLElement
 		{
 			try
 			{
-				const arr = this.getAttribute('background-color').split(', ').map(Number);
+				const arr = this.getAttribute('background-color').split(' ').map((x) => Number(x) / 255.0);
 				if(arr.length === 3)
-					this.#renderer.setBackgroundColor(arr);
+					this.#renderParams.backgroundColor = arr;
 			}
 			catch(e) { }
 
@@ -310,11 +310,6 @@ export class SplatPlayer extends HTMLElement
 		this.#camera.attachToCanvas(this.#canvas);
 	}
 
-	setBackgroundColor(color) //TODO: remove this
-	{
-		this.#renderer.setBackgroundColor(color);
-	}
-
 	//-------------------------//
 
 	#canvas = null;
@@ -326,6 +321,7 @@ export class SplatPlayer extends HTMLElement
 	#autoplay = false;
 	#controls = false;
 	#debug = false;
+	#renderParams = {};
 
 	#segments = [];
 
@@ -334,7 +330,7 @@ export class SplatPlayer extends HTMLElement
 	#isScrubbing = false;
 	#playing = false;
 
-	#controlsOverlay;
+	#controlsOverlay = null;
 	#playPauseBtn = null;
 	#scrubber = null;
 	#debugOverlay = null;
@@ -406,7 +402,7 @@ export class SplatPlayer extends HTMLElement
 		//render:
 		//---------------
 		const normTime = this.#curTime / (duration > 0.0 ? duration : 1.0);
-		this.#renderer.draw(view, proj, normTime, this.#debug);
+		this.#renderer.draw(view, proj, normTime, this.#renderParams, this.#debug);
 
 		//update profiling display:
 		//---------------
