@@ -264,6 +264,16 @@ export class SplatPlayer extends HTMLElement
 		}
 	}
 
+	play()
+	{
+		this.#playing = true;
+	}
+
+	pause()
+	{
+		this.#playing = false;
+	}
+
 	enqueue(buf)
 	{
 		//TODO: if decoding becomes expensive, we may need to run this on a background thread?
