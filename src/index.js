@@ -41,6 +41,7 @@ export class SplatPlayer extends HTMLElement
 		this.#debugOverlay = document.createElement('div');
 		Object.assign(this.#debugOverlay.style, {
 			position: 'absolute',
+			display: 'none',
 			top: '1%',
 			left: '1%',
 			color: 'white',
@@ -58,13 +59,13 @@ export class SplatPlayer extends HTMLElement
 
 		//create controls container:
 		//---------------
-		const controls = document.createElement('div');
-		Object.assign(controls.style, {
+		this.#controlsOverlay = document.createElement('div');
+		Object.assign(this.#controlsOverlay.style, {
 			position: 'absolute',
 			bottom: '1%',
 			left: '50%',
 			transform: 'translateX(-50%)',
-			display: 'flex',
+			display: 'none',
 			alignItems: 'center',
 			justifyContent: 'center',
 			gap: '8px',
@@ -76,13 +77,12 @@ export class SplatPlayer extends HTMLElement
 			width: '50%',
 			flexWrap: 'wrap',
 		});
-		container.appendChild(controls);
+		container.appendChild(this.#controlsOverlay);
 
 		//create play button:
 		//---------------
 		this.#playPauseBtn = document.createElement('button');
 		this.#playPauseBtn.type = 'button';
-		this.#playPauseBtn.textContent = '⏸️';
 		Object.assign(this.#playPauseBtn.style, {
 			border: 'none',
 			background: 'transparent',
@@ -94,15 +94,17 @@ export class SplatPlayer extends HTMLElement
 		});
 		this.#playPauseBtn.addEventListener('click', () => {
 			this.#playing = !this.#playing;
-			this.#playPauseBtn.textContent = this.#playing ? '⏸️' : '▶️';
+			if(this.#segments.length == 1 && this.#curTime >= this.#segments[0].metadata.duration)
+				this.#curTime = 0.0;
 		});
-		controls.appendChild(this.#playPauseBtn);
+		this.#controlsOverlay.appendChild(this.#playPauseBtn);
 
 		//create scrubber:
 		//---------------
 		this.#scrubber = document.createElement('input');
 		this.#scrubber.type = 'range';
 		this.#scrubber.min = 0;
+		this.#scrubber.max = 1;
 		this.#scrubber.step = 0.001; //milliseconds
 		this.#scrubber.value = 0;
 		Object.assign(this.#scrubber.style, {
@@ -115,33 +117,19 @@ export class SplatPlayer extends HTMLElement
 
 		this.#isScrubbing = false;
 
-		this.#scrubber.addEventListener('input', (e) => {
-			const t = parseFloat(this.#scrubber.value);
-			this.#videoTime = t;
-
-			let frameIndex = Math.floor(t / this.#timePerFrame);
-			frameIndex = Math.max(0, Math.min(this.#frames.length - 1, frameIndex));
-
-			if(this.#frames[frameIndex]) 
-				this.#renderer.setGaussians(this.#frames[frameIndex]);
-			this.#curFrame = frameIndex;
+		this.#scrubber.addEventListener('input', () => {
+			this.#curTime = parseFloat(this.#scrubber.value);
 		});
 
 		this.#scrubber.addEventListener('pointerdown', () => {
 			this.#isScrubbing = true;
 		});
 
-		this.#scrubber.addEventListener('pointerup', (e) => {
+		this.#scrubber.addEventListener('pointerup', () => {
 			this.#isScrubbing = false;
-			const t = parseFloat(this.#scrubber.value);
-			this.#videoTime = t;
-			const frame = Math.floor(this.#videoTime / this.#timePerFrame);
-			this.#curFrame = Math.max(0, Math.min(this.#frames.length - 1, frame));
-			if (this.#frames[this.#curFrame])
-				this.#renderer.setGaussians(this.#frames[this.#curFrame]);
 		});
 
-		controls.appendChild(this.#scrubber);
+		this.#controlsOverlay.appendChild(this.#scrubber);
 	}
 
 	connectedCallback() 
@@ -168,10 +156,9 @@ export class SplatPlayer extends HTMLElement
 		});
 		this.#resizeObserver.observe(this.#canvas);
 
-		//load empty gaussians:
+		//clear segments:
 		//---------------
-		this.#frames = [ new MGS.Gaussians() ];
-		this.#updateScrubberRange();
+		this.clear();
 
 		//begin main loop:
 		//---------------
@@ -185,36 +172,55 @@ export class SplatPlayer extends HTMLElement
 		this.#camera.detachFromCanvas();
 		this.#resizeObserver.disconnect();
 	}
-
+ 
 	static get observedAttributes()
 	{
 		return [
-			'src-ply',
-			'src-gs', 
-			'src-mgs', 
-			'camera',
-			'debug'
+			'src', 'scene',
+			'camera', 'background-color',
+			'loop', 'autoplay', 'controls', 'debug'
 		];
 	}
 
 	attributeChangedCallback(name, oldValue, newValue)
 	{
-		if(oldValue == newValue)
+		if(oldValue === newValue)
 			return;
 
 		switch(name)
 		{
-		case 'src-ply':
-			this.#fetchBuf(newValue).then((buf) => {
-				this.setPLY(buf);
-			});
+		case 'src':
+		{
+			if(newValue == null)
+				this.#setSrc(null);
+			else
+			{
+				this.#fetchBuf(newValue).then((buf) => {
+					if(newValue.endsWith('.ply'))
+						this.#setSrc(MGS.loadPly(buf));
+					else
+						this.#setSrc(MGS.decode(buf));
+				});
+			}
+
 			break;
-		case 'src-gs':
-		case 'src-mgs':
-			this.#fetchBuf(newValue).then((buf) => {
-				this.setMGS(buf);
-			});
+		}
+		case 'scene':
+		{
+			if(newValue == null)
+				this.#setScene(null);
+			else
+			{
+				this.#fetchBuf(newValue).then((buf) => {
+					if(newValue.endsWith('.ply'))
+						this.#setScene(MGS.loadPly(buf));
+					else
+						this.#setScene(MGS.decode(buf));
+				});
+			}
+
 			break;
+		}
 		case 'camera':
 		{
 			let type = 'default';
@@ -224,72 +230,55 @@ export class SplatPlayer extends HTMLElement
 				params = JSON.parse(newValue);
 				type = params.type;
 			} 
-			catch (e) 
-			{
-				console.warn("Invalid JSON for 'camera' attribute, must be a JSON object containing a 'type' attribute");
-			}
+			catch(e) { }
 
 			this.setCamera(type, params);
 			break;
 		}
-		case 'debug':
+		case 'background-color':
 		{
-			this.#debug = newValue === 'on' ? true : false;
+			try
+			{
+				const arr = this.getAttribute('background-color').split(', ').map(Number);
+				if(arr.length === 3)
+					this.#renderer.setBackgroundColor(arr);
+			}
+			catch(e) { }
+
 			break;
 		}
+		case 'loop':
+			this.#loop = this.hasAttribute('loop');
+			break;
+		case 'autoplay':
+			this.#autoplay = this.hasAttribute('autoplay');
+			break;
+		case 'controls':
+			this.#controls = this.hasAttribute('controls');
+			break;
+		case 'debug':
+			this.#debug = this.hasAttribute('debug');
+			break;
 		default:
 			break;
 		}
 	}
 
-	setPLY(buf)
+	enqueue(buf)
 	{
-		throw new Error("PLY loading not yet implemented");
+		//TODO: if decoding becomes expensive, we may need to run this on a background thread?
 
-		/*this.#frames = [ MGS.loadPly(buf) ];
-		this.#timePerFrame = 1.0;
-		this.#curFrame = -1;
-		this.#videoTime = 0.0;
-
-		this.#updateScrubberRange();*/
+		this.#segments.push(MGS.decode(buf));
 	}
 
-	setMGS(buf)
+	clear()
 	{
-		this.#frames = [ MGS.decode(buf) ];
-		this.#timePerFrame = 1.0;
-		this.#curFrame = -1;
-		this.#videoTime = 0.0;
-
-		this.#updateScrubberRange();
-	}
-
-	setSequencePLY(bufs, timePerFrame)
-	{
-		throw new Error("PLY loading not yet implemented");
-
-		/*if(timePerFrame === undefined)
-			throw new Error('Must providea a framerate to setSequencePLY');
-
-		this.#frames = bufs.map(b => MGS.loadPly(b));
-		this.#timePerFrame = timePerFrame;
-		this.#curFrame = -1;
-		this.#videoTime = 0.0;
-
-		this.#updateScrubberRange();*/
-	}
-
-	setSequenceGS(bufs, timePerFrame)
-	{
-		if(timePerFrame === undefined)
-			throw new Error('Must providea a framerate to setSequenceGS');
-
-		this.#frames = bufs.map(b => MGS.decode(b));
-		this.#timePerFrame = timePerFrame;
-		this.#curFrame = -1;
-		this.#videoTime = 0.0;
-
-		this.#updateScrubberRange();
+		this.#segments = [{ 
+			gaussians: new MGS.Gaussians(),
+			metadata: {
+				duration: 0.0
+			}
+		}];	
 	}
 
 	setCamera(type, options)
@@ -311,7 +300,7 @@ export class SplatPlayer extends HTMLElement
 		this.#camera.attachToCanvas(this.#canvas);
 	}
 
-	setBackgroundColor(color)
+	setBackgroundColor(color) //TODO: remove this
 	{
 		this.#renderer.setBackgroundColor(color);
 	}
@@ -323,60 +312,79 @@ export class SplatPlayer extends HTMLElement
 	#camera = null;
 	#resizeObserver = null;
 
+	#loop = false;
+	#autoplay = false;
+	#controls = false;
 	#debug = false;
 
-	#frames = [];
-	#timePerFrame = 1.0;
+	#segments = [];
 
 	#lastRenderTime = null;
-	#videoTime = 0.0;
-	#curFrame = 0;
+	#curTime = 0.0;
 	#isScrubbing = false;
 	#playing = false;
 
+	#controlsOverlay;
 	#playPauseBtn = null;
 	#scrubber = null;
 	#debugOverlay = null;
 
 	//-------------------------//
 
-	#mainLoop(timestamp)
+	#mainLoop(renderTime)
 	{
 		//update timing:
 		//---------------
-		timestamp /= 1000.0; //we want dt in seconds
+		renderTime /= 1000.0; //we want dt in seconds
 
 		var dt = 0.0;
 		if(this.#lastRenderTime)
-			dt = timestamp - this.#lastRenderTime;
+			dt = renderTime - this.#lastRenderTime;
 
 		if(this.#playing && !this.#isScrubbing)
-			this.#videoTime += dt;
+			this.#curTime += dt;
 
-		const duration = this.#frames.length * this.#timePerFrame;
-		this.#videoTime %= duration;
-
-		let frameIndex = Math.floor(this.#videoTime / this.#timePerFrame);
-		frameIndex = Math.max(0, Math.min(this.#frames.length - 1, frameIndex));
-		
-		let frameLocalTime = (this.#videoTime % this.#timePerFrame) / this.#timePerFrame;
-		frameLocalTime = Math.max(0.0, Math.min(1.0, frameLocalTime));
-
-		if(frameIndex !== this.#curFrame) 
+		//update current segment:
+		//---------------
+		let segment = this.#segments[0];
+		let segmentUpdated = false;
+		while(this.#curTime >= segment.metadata.duration && this.#segments.length > 1)
 		{
-			this.#renderer.setGaussians(this.#frames[frameIndex]);
-			this.#curFrame = frameIndex;
+			this.#curTime -= segment.metadata.duration;
+			this.#segments.shift();
+
+			segment = this.#segments[0];
+			segmentUpdated = true;
 		}
 
-		//update scrubber:
+		if(segmentUpdated)
+			this.#renderer.setGaussians(segment.gaussians);
+
+		if(this.#loop)
+			this.#curTime %= segment.metadata.duration;
+		else if(this.#curTime > segment.metadata.duration)
+		{
+			this.#curTime = segment.metadata.duration;
+			this.#playing = false;
+		}
+		
+		//update controls overlay:
 		//---------------
+		const showControls = this.#controls && segment.metadata.duration > 0.0;
+		Object.assign(this.#controlsOverlay.style, {
+			display: showControls ? 'flex' : 'none'
+		});
+
+		this.#playPauseBtn.textContent = this.#playing ? '⏸️' : '▶️';
+
+		this.#scrubber.max = segment.metadata.duration;
 		if(!this.#isScrubbing && this.#scrubber) 
-			this.#scrubber.value = this.#videoTime;
+			this.#scrubber.value = this.#curTime;
 
 		//update camera:
 		//---------------
-		this.#lastRenderTime = timestamp;
-		this.#camera.update(dt * 1000.0);
+		this.#lastRenderTime = renderTime;
+		this.#camera.update(dt * 1000.0); // TODO: use seconds everywhere
 
 		//create cam/proj matrices:
 		//---------------
@@ -385,13 +393,16 @@ export class SplatPlayer extends HTMLElement
 
 		//render:
 		//---------------
-		this.#renderer.draw(view, proj, frameLocalTime, this.#debug);
+		const normTime = this.#curTime / segment.metadata.duration;
+		this.#renderer.draw(view, proj, normTime, this.#debug);
 
 		//update profiling display:
 		//---------------
 		const profile = this.#renderer.getPerformanceProfile();
 
-		this.#debugOverlay.style.opacity = this.#debug ? '1' : '0';
+		Object.assign(this.#debugOverlay.style, {
+			display: this.#debug ? 'flex' : 'none'
+		});
 		this.#debugOverlay.textContent = 
 			`Frame Time: ${this.#formatProfile(profile.totalTime)}\n` +
 			`\t- Preprocess: ${this.#formatProfile(profile.preprocessTime)}\n` +
@@ -405,14 +416,18 @@ export class SplatPlayer extends HTMLElement
 		});
 	}
 
-	#updateScrubberRange()
+	#setSrc(gaussians)
 	{
-		if(!this.#scrubber) 
-			return;
+		this.#segments = [ gaussians ];
+		this.#curTime = 0.0;
+		this.#playing = this.#autoplay;
 
-		this.#scrubber.min = 0;
-		this.#scrubber.max = this.#frames.length * this.#timePerFrame - 0.001;
-		this.#scrubber.value = 0;
+		this.#renderer.setGaussians(gaussians.gaussians);
+	}
+
+	#setScene(gaussians)
+	{
+
 	}
 
 	async #fetchBuf(url)

@@ -17,22 +17,21 @@
   </style>
 </head>
 <body>
-  <splat-player debug="on" src-mgs="combined2.mgs"></splat-player>
+  <splat-player controls loop debug></splat-player>
   <script type="module">
     import "../src/index.js";
+    await customElements.whenDefined('splat-player');
 
-    /*let bufs = [];
+    const player = document.querySelector('splat-player');
     for(let i = 0; i < 25; i++)
     {
       const response = await fetch(`fashion/${i}.mgs`);
       if(!response.ok)
         throw new Error("Failed to fetch buffer at ");
 
-      bufs.push(await response.arrayBuffer());
+      player.enqueue(await response.arrayBuffer());
     }
 
-    const player = document.querySelector('splat-player');
-    player.setSequenceGS(bufs, 11.0 / 25.0);*/
   // player.setBackgroundColor([1.0,1.0,1.])
         /*player.setCamera('snap', {
           // minRadius: 0.125,
