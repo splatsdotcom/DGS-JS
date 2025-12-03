@@ -347,13 +347,15 @@ export class SplatPlayer extends HTMLElement
 		//update current segment:
 		//---------------
 		let segment = this.#segments[0];
+		let duration = segment.metadata.duration;
 		let segmentUpdated = false;
-		while(this.#curTime >= segment.metadata.duration && this.#segments.length > 1)
+		while(this.#curTime >= duration && this.#segments.length > 1)
 		{
-			this.#curTime -= segment.metadata.duration;
+			this.#curTime -= duration;
 			this.#segments.shift();
 
 			segment = this.#segments[0];
+			duration = segment.metadata.duration;
 			segmentUpdated = true;
 		}
 
@@ -361,23 +363,23 @@ export class SplatPlayer extends HTMLElement
 			this.#renderer.setGaussians(segment.gaussians);
 
 		if(this.#loop)
-			this.#curTime %= segment.metadata.duration;
-		else if(this.#curTime > segment.metadata.duration)
+			this.#curTime %= (duration > 0.0 ? duration : 1.0);
+		else if(this.#curTime > duration)
 		{
-			this.#curTime = segment.metadata.duration;
+			this.#curTime = duration;
 			this.#playing = false;
 		}
 		
 		//update controls overlay:
 		//---------------
-		const showControls = this.#controls && segment.metadata.duration > 0.0;
+		const showControls = this.#controls && duration > 0.0;
 		Object.assign(this.#controlsOverlay.style, {
 			display: showControls ? 'flex' : 'none'
 		});
 
 		this.#playPauseBtn.textContent = this.#playing ? '⏸️' : '▶️';
 
-		this.#scrubber.max = segment.metadata.duration;
+		this.#scrubber.max = duration;
 		if(!this.#isScrubbing && this.#scrubber) 
 			this.#scrubber.value = this.#curTime;
 
@@ -393,7 +395,7 @@ export class SplatPlayer extends HTMLElement
 
 		//render:
 		//---------------
-		const normTime = this.#curTime / segment.metadata.duration;
+		const normTime = this.#curTime / (duration > 0.0 ? duration : 1.0);
 		this.#renderer.draw(view, proj, normTime, this.#debug);
 
 		//update profiling display:
@@ -427,7 +429,7 @@ export class SplatPlayer extends HTMLElement
 
 	#setScene(gaussians)
 	{
-
+		this.#renderer.setScene(gaussians.gaussians);
 	}
 
 	async #fetchBuf(url)

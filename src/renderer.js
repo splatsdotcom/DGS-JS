@@ -49,13 +49,20 @@ class Renderer
 
 	setGaussians(gaussians)
 	{
-		this.#gaussians = gaussians;
+		//TODO: improve perf !!! scene may be very large, so we dont want to combine + reupload
+
+		this.#gaussians = this.#scene ? MGS.combine(gaussians, this.#scene) : gaussians;
 		this.#gaussianBufs = this.#createGaussianBufs(this.#gaussians);
 
 		this.#sorter?.delete();
 
 		this.#lastSortParams = null; //TODO: allow you to give the gaussians presorted !
 		this.#sorter = new MGS.Sorter(this.#gaussians);
+	}
+
+	setScene(gaussians)
+	{
+		this.#scene = gaussians;
 	}
 
 	setBackgroundColor(color)
@@ -267,6 +274,7 @@ class Renderer
 	#profiler = null;
 
 	#backgroundColor = [0.0, 0.0, 0.0];
+	#scene = null;
 
 	#gaussians = null;
 	#gaussianBufs = null;

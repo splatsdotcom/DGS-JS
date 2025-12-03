@@ -17,12 +17,31 @@
   </style>
 </head>
 <body>
-  <splat-player controls loop debug></splat-player>
+  <splat-player controls debug scene="test.mgs"></splat-player>
   <script type="module">
     import "../src/index.js";
     await customElements.whenDefined('splat-player');
 
     const player = document.querySelector('splat-player');
+
+    /*player.setCamera('snap', {
+      radius: 0.18,
+      maxRadius: 0.25,
+      minRadius: 0.18,
+      baseTheta: Math.PI,
+      basePhi: -0.2,
+      theta: Math.PI,
+      phi: -0.2,
+      targetX: -0.00,
+      targetY: -0.02,
+      targetZ: 0.22,
+      resistance: 0.7,
+      deadZone: 0.1,
+      snapSmoothness: 0.9925,
+      valueSmoothness: 0.9925,
+      fov: 45,
+    });*/
+
     for(let i = 0; i < 25; i++)
     {
       const response = await fetch(`fashion/${i}.mgs`);
@@ -31,27 +50,6 @@
 
       player.enqueue(await response.arrayBuffer());
     }
-
-  // player.setBackgroundColor([1.0,1.0,1.])
-        /*player.setCamera('snap', {
-          // minRadius: 0.125,
-          // maxRadius: 0.3,
-          radius: 0.18,
-          maxRadius: 0.25,
-          minRadius: 0.18,
-          baseTheta: Math.PI,
-          basePhi: -0.2,
-          theta: Math.PI,
-          phi: -0.2,
-          targetX: -0.00,
-          targetY: -0.02,
-          targetZ: 0.22,
-          resistance: 0.7,
-          deadZone: 0.1,
-          snapSmoothness: 0.9925,
-          valueSmoothness: 0.9925,
-          fov: 45,
-        });*/
   </script>
 </body>
 </html>
