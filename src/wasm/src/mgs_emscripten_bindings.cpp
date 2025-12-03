@@ -118,8 +118,13 @@ EMSCRIPTEN_BINDINGS(libmgs_js)
 			));
 		}));
 
+	emscripten::value_object<MGSmetadata>("Metadata")
+		.field("duration", &MGSmetadata::duration);
+
 	emscripten::function("decode", emscripten::optional_override([](const emscripten::val& arg)
 	{
+		//decode:
+		//---------------
 		emscripten::val bufView = emscripten::val::global("Uint8Array").new_(arg);
 		std::vector<uint8_t> data = emscripten::convertJSArrayToNumberVector<uint8_t>(bufView);
 
@@ -131,11 +136,18 @@ EMSCRIPTEN_BINDINGS(libmgs_js)
 			}
 		);
 
-		MGSerror error = mgs_decode_from_buffer(data.size(), data.data(), gaussians.get());
+		MGSmetadata metadata;
+		MGSerror error = mgs_decode_from_buffer(data.size(), data.data(), gaussians.get(), &metadata);
 		if(error != MGS_SUCCESS)
 			throw std::runtime_error("MGS internal error: \"" + std::string(mgs_error_get_description(error)) + "\"");
 
-		return gaussians;
+		//wrap into js object:
+		//---------------
+		emscripten::val result = emscripten::val::object();
+		result.set("gaussians", gaussians);
+		result.set("metadata", metadata);
+
+		return result;
 	}));
 
 	emscripten::function("combine", emscripten::optional_override([](const std::shared_ptr<MGSgaussians>& g1, const std::shared_ptr<MGSgaussians>& g2)
