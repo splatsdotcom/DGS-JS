@@ -310,6 +310,33 @@ export class SplatPlayer extends HTMLElement
 		this.#camera.attachToCanvas(this.#canvas);
 	}
 
+	get paused()
+	{
+		return !this.#playing;
+	}
+
+	get currentTime()
+	{
+		return this.#curTime;
+	}
+	
+	set currentTime(value)
+	{
+		const duration = this.#segments[0].metadata.duration;
+		if(value < 0.0 || value > duration)
+		{
+			console.warn('Setting out-of-bounds currentTime');
+			return;
+		}
+
+		this.#curTime = value;
+	}
+
+	get currentSegment()
+	{
+		return this.#segments[0];
+	}
+
 	//-------------------------//
 
 	#canvas = null;
@@ -357,6 +384,9 @@ export class SplatPlayer extends HTMLElement
 		let segmentUpdated = false;
 		while(this.#curTime >= duration && this.#segments.length > 1)
 		{
+			if(duration > 0.0)
+				this.onSegmentEnd?.(false);
+
 			this.#curTime -= duration;
 			this.#segments.shift();
 
@@ -372,6 +402,9 @@ export class SplatPlayer extends HTMLElement
 			this.#curTime %= (duration > 0.0 ? duration : 1.0);
 		else if(this.#curTime > duration)
 		{
+			if(duration > 0.0)
+				this.onSegmentEnd?.(true);
+
 			this.#curTime = duration;
 			this.#playing = false;
 		}
