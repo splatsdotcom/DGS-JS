@@ -24,7 +24,7 @@
 
     const player = document.querySelector('splat-player');
 
-    /*player.setCamera('snap', {
+    player.setCamera('snap', {
       radius: 0.18,
       maxRadius: 0.25,
       minRadius: 0.18,
@@ -40,7 +40,14 @@
       snapSmoothness: 0.9925,
       valueSmoothness: 0.9925,
       fov: 45,
-    });*/
+    });
+
+    player.onSegmentEnd = (last) => {
+      if(last)
+        console.log('finished last segment!')
+      else
+        console.log('finished segment!');
+    }
 
     for(let i = 0; i < 25; i++)
     {
