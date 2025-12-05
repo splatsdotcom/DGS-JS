@@ -62,12 +62,9 @@ include_directories(
 )
 target_link_libraries(${PROJECT_NAME})
 
-# apply nextjs-specific patch + copy up to wasm/ directory:
+# copy up to wasm/ directory:
 # -----------------
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND python3
-        "${CMAKE_CURRENT_SOURCE_DIR}/patch_nextjs.py"
-        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/${PROJECT_NAME}.js"
 	COMMAND ${CMAKE_COMMAND} -E copy
 		"$<TARGET_FILE_DIR:${PROJECT_NAME}>/${PROJECT_NAME}.js"
 		"${CMAKE_SOURCE_DIR}/mgs.js"
