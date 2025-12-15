@@ -1,16 +1,19 @@
 {
     "name": "splat-test",
     "version": "0.1.46",
-    "main": "src/index.js",
+    "main": "dist/index.js",
     "files": [
-        "src/**/*"
+        "dist/**/*"
     ],
     "type": "module",
     "scripts": {
-        "dev": "vite"
+        "build": "node build.js",
+        "dev": "vite",
+        "prepare": "npm run build"
     },
     "devDependencies": {
-        "vite": "^7.1.5"
+        "vite": "^7.1.5",
+        "vite-plugin-string": "^1.2.3"
     },
     "dependencies": {
         "gl-matrix": "^3.4.4"
