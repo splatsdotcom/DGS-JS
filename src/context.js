@@ -37,6 +37,6 @@ export const device = adapter?.then(async (adpt) => {
 });
 
 if(!navigator.gpu)
-	console.warn('WebGPU not supported, you will be unable to create <splat-player>');
+	console.warn('WebGPU not supported, you will be unable to create <dgs-player>');
 else if(!adapter || !device)
 	throw new Error('WebGPU supported, but failed to create adapter or device!');
