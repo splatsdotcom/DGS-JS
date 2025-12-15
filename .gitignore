@@ -2,7 +2,7 @@
 dist/
 node_modules/
 src/wasm/build/
-src/wasm/mgs.js
+src/wasm/dgs.js
 
 # editor configs
 .vscode/
@@ -10,7 +10,6 @@ src/wasm/mgs.js
 # assets for testing
 *.ply
 *.gs
-*.mgs
 *.dgs
 
 # macos
