@@ -19,9 +19,9 @@ import { mat4, vec3 } from 'gl-matrix';
 import { MGS, adapter, device } from './context.js';
 import Sorter from './sorter.js';
 
-import GAUSSIAN_PREPROCESS_SHADER_SRC from './shaders/gaussian_preprocess.wgsl?raw';
-import GAUSSIAN_RASTERIZE_SHADER_SRC  from './shaders/gaussian_rasterize.wgsl?raw';
-import COMPOSITE_SHADER_SRC from './shaders/composite.wgsl?raw';
+import GAUSSIAN_PREPROCESS_SHADER_SRC from './shaders/gaussian_preprocess.wgsl';
+import GAUSSIAN_RASTERIZE_SHADER_SRC  from './shaders/gaussian_rasterize.wgsl';
+import COMPOSITE_SHADER_SRC from './shaders/composite.wgsl';
 
 //-------------------------//
 
