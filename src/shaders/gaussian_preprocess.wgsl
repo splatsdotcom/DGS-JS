@@ -231,7 +231,13 @@ fn preprocess(@builtin(global_invocation_id) GID: vec3u, @builtin(local_invocati
 	}
 
 	var rgba = clamp(clipPos.z / clipPos.w + 1.0, 0.0, 1.0) * vec4f(color, opacity);
-	if(clipPos.z < -CLIP_THRESHHOLD * clipPos.w) //to gaussians rendering behind the camera when cpu culling is slow
+
+	//culling:
+	//---------------
+	let isBehind = clipPos.z < -CLIP_THRESHHOLD * clipPos.w;
+	let isDegenerate = lambda2 < 0.0;
+
+	if(isBehind || isDegenerate)
 	{
 		rgba = vec4f(0.0);
 	}

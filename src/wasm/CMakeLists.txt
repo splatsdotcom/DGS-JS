@@ -7,13 +7,12 @@ project(mgs VERSION 1.0)
 # find source files:
 # -----------------
 set(mgs_src
-	"src/mgs_sorter.cpp"
-	"src/mgs_emscripten_bindings.cpp"
+	"ext.cpp"
 
-	"external/MGS/csrc/src/mgs_error.c"
-	"external/MGS/csrc/src/mgs_gaussians.c"
-	"external/MGS/csrc/src/mgs_encode.c"
-	"external/MGS/csrc/src/mgs_decode.c"
+	"MGS/csrc/src/mgs_error.c"
+	"MGS/csrc/src/mgs_gaussians.c"
+	"MGS/csrc/src/mgs_encode.c"
+	"MGS/csrc/src/mgs_decode.c"
 )
 
 # create executable:
@@ -21,8 +20,8 @@ set(mgs_src
 add_executable(${PROJECT_NAME} ${mgs_src})
 
 include_directories(${PROJECT_NAME}
-	"external/MGS/csrc/include"
-	"external/MGS/csrc/external"
+	"MGS/csrc/include"
+	"MGS/csrc/external"
 )
 
 # set emscripten flags:
@@ -33,32 +32,25 @@ set_target_properties(${PROJECT_NAME} PROPERTIES COMPILE_FLAGS
 	-msimd128     \
 	-msse2        \
 	-msse3        \
-	-pthread      \
 	-fexceptions"
 )
 set_target_properties(${PROJECT_NAME} PROPERTIES LINK_FLAGS 
-	"-s ENVIRONMENT=web,worker     \
-	 -s SINGLE_FILE=1              \
-	 -s MODULARIZE=1               \
-	 -s EXPORT_ES6=1               \
-	 -s EXPORT_NAME=MGS            \
-	 -s ALLOW_MEMORY_GROWTH        \
-	 -s SHARED_MEMORY=1            \
-	 -s PTHREAD_POOL_SIZE=\"navigator.hardwareConcurrency + 2\"        \
-	 -s PTHREAD_POOL_SIZE_STRICT=2 \
-	 -O3                           \
-	 -pthread                      \
-	 -flto                         \
-	 -fexceptions                  \
+	"-s ENVIRONMENT=web     \
+	 -s SINGLE_FILE=1       \
+	 -s MODULARIZE=1        \
+	 -s EXPORT_ES6=1        \
+	 -s EXPORT_NAME=MGS     \
+	 -s ALLOW_MEMORY_GROWTH \
+	 -O3                    \
+	 -flto                  \
+	 -fexceptions           \
 	 --bind"
 )
 
 # add include dirs + libraries:
 # -----------------
 include_directories(
-	"${CMAKE_CURRENT_SOURCE_DIR}/include" 
-	"${CMAKE_CURRENT_SOURCE_DIR}/external/QuickMathHPP" 
-	"${CMAKE_CURRENT_SOURCE_DIR}/external/MGS/csrc/include" 
+	"${CMAKE_CURRENT_SOURCE_DIR}/MGS/csrc/include" 
 )
 target_link_libraries(${PROJECT_NAME})
 

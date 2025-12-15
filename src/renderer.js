@@ -17,6 +17,7 @@ const RESORT_TIME_CUTOFF = 0.0;
 
 import { mat4, vec3 } from 'gl-matrix';
 import { MGS, adapter, device } from './context.js';
+import Sorter from './sorter.js';
 
 import GAUSSIAN_PREPROCESS_SHADER_SRC from './shaders/gaussian_preprocess.wgsl?raw';
 import GAUSSIAN_RASTERIZE_SHADER_SRC  from './shaders/gaussian_rasterize.wgsl?raw';
@@ -57,7 +58,7 @@ class Renderer
 		this.#sorter?.delete();
 
 		this.#lastSortParams = null; //TODO: allow you to give the gaussians presorted !
-		this.#sorter = new MGS.Sorter(this.#gaussians);
+		this.#sorter = new Sorter(this.#gaussians, this.#uploadSortedIndices.bind(this));
 	}
 
 	setScene(gaussians)
@@ -75,29 +76,10 @@ class Renderer
 
 		//resort if needed:
 		//-----------------
-		if(this.#lastSortParams == null)
+		if(!this.#sortPending && this.#shouldResort(view, time)) 
 		{
-			//need to sort synchronously if not already sorted
+			this.#sortPending = true;
 			this.#sorter.sort(view, proj, time);
-			this.#uploadLatestSort();
-
-			this.#lastSortParams = {
-				view: view.slice(),
-				time: time
-			};
-		}
-		else if(this.#sorter.sortPending)
-		{
-			if(this.#sorter.sortAsyncTryJoin())
-			{
-				this.#uploadLatestSort();
-				this.#latestProfile.lastSortTime = performance.now() - this.#sortStartTime;
-			}
-		}
-		else if(this.#shouldResort(view, time)) 
-		{
-			this.#sortStartTime = performance.now();
-			this.#sorter.sortAsyncStart(view, proj, time);
 
 			this.#lastSortParams = {
 				view: view.slice(),
@@ -277,7 +259,7 @@ class Renderer
 	#numGaussiansVisible = 0;
 
 	#sorter = null;
-	#sortStartTime = null;
+	#sortPending = false;
 	#lastSortParams = null;
 
 	#lastRenderTime = null;
@@ -665,6 +647,9 @@ class Renderer
 
 	#shouldResort(view, time)
 	{
+		if(this.#lastSortParams == null)
+			return true;
+
 		const lastView = this.#lastSortParams.view;
 
 		const viewDir = [ view[0 * 4 + 2], view[1 * 4 + 2], view[2 * 4 + 2] ];
@@ -692,10 +677,13 @@ class Renderer
 		);
 	}
 
-	#uploadLatestSort()
+	#uploadSortedIndices(indices, duration)
 	{
-		this.#numGaussiansVisible = this.#sorter.latest.length;
-		device.queue.writeBuffer(this.#gaussianBufs.sortedIndices, 0, this.#sorter.latest);
+		this.#numGaussiansVisible = indices.length;
+		device.queue.writeBuffer(this.#gaussianBufs.sortedIndices, 0, indices);
+
+		this.#sortPending = false;
+		this.#latestProfile.lastSortTime = duration;
 	}
 
 	#maybeReuseBuf(oldBuf, options)
