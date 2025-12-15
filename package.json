@@ -1,6 +1,6 @@
 {
     "name": "dgs-js",
-    "version": "0.1.49",
+    "version": "1.0.0",
     "main": "dist/index.js",
     "files": [
         "dist/**/*"
