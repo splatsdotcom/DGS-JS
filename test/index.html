@@ -17,12 +17,11 @@
   </style>
 </head>
 <body>
-  <splat-player controls debug src="bonsai.dgs" background-color="0 0 0"></splat-player>
+  <splat-player controls debug scene="bonsai.dgs" background-color="0 0 0"></splat-player>
   <script type="module">
     import "../src/index.js";
-    await customElements.whenDefined('splat-player');
 
-    /*const player = document.querySelector('splat-player');
+    const player = document.querySelector('splat-player');
 
     player.setCamera('snap', {
       radius: 0.18,
@@ -51,12 +50,12 @@
 
     for(let i = 0; i < 25; i++)
     {
-      const response = await fetch(`fashion/${i}.mgs`);
+      const response = await fetch(`fashion/${i}.dgs`);
       if(!response.ok)
         throw new Error("Failed to fetch buffer at ");
 
       player.enqueue(await response.arrayBuffer());
-    }*/
+    }
   </script>
 </body>
 </html>

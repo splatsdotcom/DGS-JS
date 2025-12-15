@@ -11,7 +11,7 @@ static QMmat4 parse_mat4(const emscripten::val& val);
 
 //-------------------------------------------//
 
-EMSCRIPTEN_BINDINGS(libmgs_js)
+EMSCRIPTEN_BINDINGS(libdgs_js)
 {
 	emscripten::class_<MGSgaussians>("Gaussians")
 		.smart_ptr<std::shared_ptr<MGSgaussians>>("Gaussians")
@@ -103,7 +103,7 @@ EMSCRIPTEN_BINDINGS(libmgs_js)
 		MGSmetadata metadata;
 		MGSerror error = mgs_decode_from_buffer(data.size(), data.data(), gaussians.get(), &metadata);
 		if(error != MGS_SUCCESS)
-			throw std::runtime_error("MGS internal error: \"" + std::string(mgs_error_get_description(error)) + "\"");
+			throw std::runtime_error("DGS internal error: \"" + std::string(mgs_error_get_description(error)) + "\"");
 
 		//wrap into js object:
 		//---------------
@@ -120,7 +120,7 @@ EMSCRIPTEN_BINDINGS(libmgs_js)
 
 		MGSerror error = mgs_gaussians_combine(g1.get(), g2.get(), out.get());
 		if(error != MGS_SUCCESS)
-			throw std::runtime_error("MGS internal error: \"" + std::string(mgs_error_get_description(error)) + "\"");
+			throw std::runtime_error("DGS internal error: \"" + std::string(mgs_error_get_description(error)) + "\"");
 
 		return out;
 	}));

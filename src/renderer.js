@@ -16,7 +16,7 @@ const RESORT_TIME_CUTOFF = 0.0;
 //-------------------------//
 
 import { mat4, vec3 } from 'gl-matrix';
-import { MGS, adapter, device } from './context.js';
+import { DGS, adapter, device } from './context.js';
 import Sorter from './sorter.js';
 
 import GAUSSIAN_PREPROCESS_SHADER_SRC from './shaders/gaussian_preprocess.wgsl';
@@ -30,6 +30,13 @@ class Renderer
 	constructor(canvas)
 	{
 		this.#canvas = canvas;
+	}
+
+	async initialize()
+	{
+		this.#dgs = await DGS;
+		this.#device = await device;
+		this.#adapter = await adapter;
 
 		this.#context = this.#createContext();
 		this.#finalTex = this.#createFinalTex();
@@ -39,7 +46,7 @@ class Renderer
 		this.#geomBufs = this.#createGeometryBuffers();
 		this.#paramsBuf = this.#createParamsBuffer();
 
-		if(adapter.features.has('timestamp-query'))
+		if(this.#adapter.features.has('timestamp-query'))
 			this.#profiler = this.#createProfiler();
 	}
 
@@ -52,13 +59,23 @@ class Renderer
 	{
 		//TODO: improve perf !!! scene may be very large, so we dont want to combine + reupload
 
-		this.#gaussians = this.#scene ? MGS.combine(gaussians, this.#scene) : gaussians;
+		this.#gaussians = this.#scene ? this.#dgs.combine(gaussians, this.#scene) : gaussians;
 		this.#gaussianBufs = this.#createGaussianBufs(this.#gaussians);
 
-		this.#sorter?.delete();
+		const sorter = new Sorter(this.#gaussians, (indices, duration) => {
+			this.#sortPending = false;
+			if(this.#sorter != sorter)
+				return;
 
-		this.#lastSortParams = null; //TODO: allow you to give the gaussians presorted !
-		this.#sorter = new Sorter(this.#gaussians, this.#uploadSortedIndices.bind(this));
+			this.#uploadSortedIndices(indices);
+
+			this.#sorted = true;
+			this.#latestProfile.lastSortTime = duration;
+		});
+
+		this.#sorted = false; //TODO: allow you to give the gaussians presorted !
+		this.#lastSortParams = null;
+		this.#sorter = sorter;
 	}
 
 	setScene(gaussians)
@@ -87,6 +104,9 @@ class Renderer
 			};
 		}
 
+		if(!this.#sorted)
+			return;
+
 		//get timing data:
 		//-----------------
 		let curRenderTime = performance.now();
@@ -112,12 +132,12 @@ class Renderer
 		let queryReadbackBuffer = null;
 		if(profile)
 		{
-			queryBuffer = device.createBuffer({
+			queryBuffer = this.#device.createBuffer({
 				size: RENDERER_NUM_TIMESTAMP_QUERIES * 8,
 				usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
 			});
 
-			queryReadbackBuffer = device.createBuffer({
+			queryReadbackBuffer = this.#device.createBuffer({
 				size: RENDERER_NUM_TIMESTAMP_QUERIES * 8,
 				usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
 			});
@@ -125,7 +145,7 @@ class Renderer
 
 		//create command encoder:
 		//---------------
-		const encoder = device.createCommandEncoder();
+		const encoder = this.#device.createCommandEncoder();
 
 		//preprocess:
 		//---------------
@@ -200,7 +220,7 @@ class Renderer
 			encoder.copyBufferToBuffer(queryBuffer, 0, queryReadbackBuffer, 0, RENDERER_NUM_TIMESTAMP_QUERIES * 8);
 		}
 
-		device.queue.submit([encoder.finish()]);
+		this.#device.queue.submit([encoder.finish()]);
 
 		//read profiling data:
 		//-----------------
@@ -243,6 +263,10 @@ class Renderer
 
 	//-------------------------//
 
+	#dgs = null;
+	#device = null;
+	#adapter = null;
+
 	#canvas = null;
 	#context = null;
 	#finalTex = null;
@@ -259,6 +283,7 @@ class Renderer
 	#numGaussiansVisible = 0;
 
 	#sorter = null;
+	#sorted = false;
 	#sortPending = false;
 	#lastSortParams = null;
 
@@ -272,7 +297,7 @@ class Renderer
 	{
 		const context = this.#canvas.getContext('webgpu');
 		context.configure({
-			device: device,
+			device: this.#device,
 			format: navigator.gpu.getPreferredCanvasFormat(),
 			alphaMode: 'opaque'
 		});
@@ -289,7 +314,7 @@ class Renderer
 
 		const format = navigator.gpu.getPreferredCanvasFormat();
 
-		const tex = device.createTexture({
+		const tex = this.#device.createTexture({
 			size: [width, height, 1],
 			format: format,
 			usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
@@ -298,19 +323,19 @@ class Renderer
 		return {
 			tex: tex,
 			view: tex.createView(),
-			sampler: device.createSampler({ magFilter: 'linear', minFilter: 'linear' })
+			sampler: this.#device.createSampler({ magFilter: 'linear', minFilter: 'linear' })
 		}
 	}
 
 	#createPreprocessPipeline()
 	{
-		const shaderModule = device.createShaderModule({
+		const shaderModule = this.#device.createShaderModule({
 			label: 'gaussian preprocess',
 
 			code: GAUSSIAN_PREPROCESS_SHADER_SRC,
 		});
 
-		return device.createComputePipeline({
+		return this.#device.createComputePipeline({
 			label: 'gaussian preprocess',
 
 			layout: 'auto',
@@ -326,13 +351,13 @@ class Renderer
 
 	#createRasterizePipeline() 
 	{
-		const shaderModule = device.createShaderModule({
+		const shaderModule = this.#device.createShaderModule({
 			label: 'gaussian rasterize',
 
 			code: GAUSSIAN_RASTERIZE_SHADER_SRC 
 		});
 
-		const pipeline = device.createRenderPipeline({
+		const pipeline = this.#device.createRenderPipeline({
 			label: 'gaussian',
 
 			layout: 'auto',
@@ -371,12 +396,12 @@ class Renderer
 
 	#createCompositePipeline()
 	{
-		const shaderModule = device.createShaderModule({ 
+		const shaderModule = this.#device.createShaderModule({ 
 			label: 'composite',
 			code: COMPOSITE_SHADER_SRC
 		});
 
-		return device.createRenderPipeline({
+		return this.#device.createRenderPipeline({
 			label: 'composite',
 			layout: 'auto',
 			vertex: { module: shaderModule, entryPoint: 'vs' },
@@ -397,7 +422,7 @@ class Renderer
 
 	#createProfiler()
 	{
-		const querySet = device.createQuerySet({
+		const querySet = this.#device.createQuerySet({
 			type: 'timestamp',
 			count: RENDERER_NUM_TIMESTAMP_QUERIES
 		});
@@ -421,13 +446,13 @@ class Renderer
 			 2.0,  2.0,
 			-2.0,  2.0
 		]);
-		const vertexBuffer = device.createBuffer({
+		const vertexBuffer = this.#device.createBuffer({
 			label: 'quad vertices',
 
 			size: quadVertices.byteLength,
 			usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
 		});
-		device.queue.writeBuffer(vertexBuffer, 0, quadVertices);
+		this.#device.queue.writeBuffer(vertexBuffer, 0, quadVertices);
 
 		//create index buffer:
 		//---------------
@@ -435,13 +460,13 @@ class Renderer
 			0, 1, 2, 
 			0, 2, 3
 		]);
-		const indexBuffer = device.createBuffer({
+		const indexBuffer = this.#device.createBuffer({
 			label: 'quad indices',
 
 			size: quadIndices.byteLength,
 			usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST
 		});
-		device.queue.writeBuffer(indexBuffer, 0, quadIndices);
+		this.#device.queue.writeBuffer(indexBuffer, 0, quadIndices);
 
 		//return:
 		//---------------
@@ -466,7 +491,7 @@ class Renderer
 		size += 1 * SIZEOF_FLOAT32;     // time
 		size += 2 * SIZEOF_UINT32;      // num gaussians + padding
 
-		return device.createBuffer({
+		return this.#device.createBuffer({
 			label: 'params',
 
 			size: size,
@@ -484,7 +509,7 @@ class Renderer
 			size: gaussians.means.byteLength,
 			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
 		});
-		device.queue.writeBuffer(meansBuf, 0, gaussians.means);
+		this.#device.queue.writeBuffer(meansBuf, 0, gaussians.means);
 
 		const covsBuf = this.#maybeReuseBuf(this.#gaussianBufs?.covariances, {
 			label: 'covariances',
@@ -492,7 +517,7 @@ class Renderer
 			size: gaussians.covariances.byteLength,
 			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
 		});
-		device.queue.writeBuffer(covsBuf, 0, gaussians.covariances);
+		this.#device.queue.writeBuffer(covsBuf, 0, gaussians.covariances);
 
 		const opacitiesBuf = this.#maybeReuseBuf(this.#gaussianBufs?.opacities, {
 			label: 'opacities',
@@ -524,7 +549,7 @@ class Renderer
 			size: Math.max(gaussians.velocities.byteLength, 4 * SIZEOF_FLOAT32),
 			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
 		});
-		device.queue.writeBuffer(velocitiesBuf, 0, gaussians.velocities);
+		this.#device.queue.writeBuffer(velocitiesBuf, 0, gaussians.velocities);
 		
 		const sortedIndicesBuf = this.#maybeReuseBuf(this.#gaussianBufs?.sortedIndices, {
 			label: 'sorted indices',
@@ -594,12 +619,12 @@ class Renderer
 		uData.set([this.#numGaussiansVisible], offset);
 		offset += 1;
 
-		device.queue.writeBuffer(this.#paramsBuf, 0, data);
+		this.#device.queue.writeBuffer(this.#paramsBuf, 0, data);
 	}
 
 	#createBindGroups()
 	{
-		const preprocessGroup = device.createBindGroup({
+		const preprocessGroup = this.#device.createBindGroup({
 			label: 'gaussian preprocess',
 
 			layout: this.#preprocessPipeline.getBindGroupLayout(0),
@@ -618,7 +643,7 @@ class Renderer
 			]
 		});
 
-		const rasterizeGroup = device.createBindGroup({
+		const rasterizeGroup = this.#device.createBindGroup({
 			label: 'gaussian rasterize',
 
 			layout: this.#rasterizePipeline.getBindGroupLayout(0),
@@ -628,7 +653,7 @@ class Renderer
 			]
 		});
 
-		const compositeGroup = device.createBindGroup({
+		const compositeGroup = this.#device.createBindGroup({
 			label: 'composite',
 
 			layout: this.#compositePipeline.getBindGroupLayout(0),
@@ -677,13 +702,10 @@ class Renderer
 		);
 	}
 
-	#uploadSortedIndices(indices, duration)
+	#uploadSortedIndices(indices)
 	{
 		this.#numGaussiansVisible = indices.length;
-		device.queue.writeBuffer(this.#gaussianBufs.sortedIndices, 0, indices);
-
-		this.#sortPending = false;
-		this.#latestProfile.lastSortTime = duration;
+		this.#device.queue.writeBuffer(this.#gaussianBufs.sortedIndices, 0, indices);
 	}
 
 	#maybeReuseBuf(oldBuf, options)
@@ -691,7 +713,7 @@ class Renderer
 		if(oldBuf == null || oldBuf.size < options.size)
 		{
 			oldBuf?.destroy();
-			return device.createBuffer(options);
+			return this.#device.createBuffer(options);
 		}
 		else
 			return oldBuf;
@@ -715,7 +737,7 @@ class Renderer
 
 		const alignedLength = byteLength & ~3;
 		if(alignedLength > 0) 
-			device.queue.writeBuffer(dst, 0, buffer, byteOffset, alignedLength);
+			this.#device.queue.writeBuffer(dst, 0, buffer, byteOffset, alignedLength);
 
 		const tail = byteLength - alignedLength;
 		if(tail > 0) 
@@ -723,7 +745,7 @@ class Renderer
 			const scratch = new Uint8Array(4);
 			scratch.set(new Uint8Array(buffer, byteOffset + alignedLength, tail));
 
-			device.queue.writeBuffer(dst, alignedLength, scratch, 0, 4);
+			this.#device.queue.writeBuffer(dst, alignedLength, scratch, 0, 4);
 		}
 	}
 

@@ -3,7 +3,7 @@
  * contains the core logic
  */
 
-import { MGS } from './context.js';
+import { DGS } from './context.js';
 import Renderer from './renderer.js'
 import { DefaultCamera, SnapCamera, PortalCamera } from './camera.js';
 
@@ -16,6 +16,13 @@ export class SplatPlayer extends HTMLElement
 		super();
 
 		const root = this.attachShadow({ mode: 'open' });
+
+		//load WASM module:
+		//---------------
+		DGS.then((dgs) => {
+			this.#dgs = dgs;
+			this.#readyResolve();
+		});
 
 		//create container:
 		//---------------
@@ -154,7 +161,6 @@ export class SplatPlayer extends HTMLElement
 
 			this.#renderer.resize();
 		});
-		this.#resizeObserver.observe(this.#canvas);
 
 		//clear segments:
 		//---------------
@@ -162,9 +168,12 @@ export class SplatPlayer extends HTMLElement
 
 		//begin main loop:
 		//---------------
-		requestAnimationFrame((t) => {
-			this.#mainLoop(t)
-		});
+		this.#renderer.initialize().then(() => {
+			this.#resizeObserver.observe(this.#canvas);
+			requestAnimationFrame((t) => {
+				this.#mainLoop(t)
+			});	
+		})
 	}
 
 	disconnectedCallback()
@@ -196,10 +205,12 @@ export class SplatPlayer extends HTMLElement
 			else
 			{
 				this.#fetchBuf(newValue).then((buf) => {
-					if(newValue.endsWith('.ply'))
-						this.#setSrc(MGS.loadPly(buf));
-					else
-						this.#setSrc(MGS.decode(buf));
+					this.#enqueueCall(() => {
+						if(newValue.endsWith('.ply'))
+							this.#setSrc(this.#dgs.loadPly(buf));
+						else
+							this.#setSrc(this.#dgs.decode(buf));
+					});
 				});
 			}
 
@@ -212,10 +223,15 @@ export class SplatPlayer extends HTMLElement
 			else
 			{
 				this.#fetchBuf(newValue).then((buf) => {
-					if(newValue.endsWith('.ply'))
-						this.#setScene(MGS.loadPly(buf));
-					else
-						this.#setScene(MGS.decode(buf));
+					this.#enqueueCall(() => {
+						if(newValue.endsWith('.ply'))
+							this.#setScene(this.#dgs.loadPly(buf));
+						else
+							this.#setScene(this.#dgs.decode(buf));
+
+						if(this.#renderer)
+							this.#renderer.setGaussians(this.#segments[0].gaussians);
+					});
 				});
 			}
 
@@ -278,17 +294,21 @@ export class SplatPlayer extends HTMLElement
 	{
 		//TODO: if decoding becomes expensive, we may need to run this on a background thread?
 
-		this.#segments.push(MGS.decode(buf));
+		this.#enqueueCall(() => {
+			this.#segments.push(this.#dgs.decode(buf));
+		});
 	}
 
 	clear()
 	{
-		this.#segments = [{ 
-			gaussians: new MGS.Gaussians(),
-			metadata: {
-				duration: 0.0
-			}
-		}];	
+		this.#enqueueCall(() => {
+			this.#segments = [{ 
+				gaussians: new this.#dgs.Gaussians(),
+				metadata: {
+					duration: 0.0
+				}
+			}];	
+		})
 	}
 
 	setCamera(type, options)
@@ -338,6 +358,8 @@ export class SplatPlayer extends HTMLElement
 	}
 
 	//-------------------------//
+
+	#dgs = null;
 
 	#canvas = null;
 	#renderer = null;
@@ -483,6 +505,25 @@ export class SplatPlayer extends HTMLElement
 	#formatProfile(x)
 	{
 		return (x?.toFixed(2) ?? 'N/A') + ' ms';
+	}
+
+	//-------------------------//
+
+	#callQueue = Promise.resolve();
+	#readyResolve = null;
+	#ready = new Promise((res) => this.#readyResolve = res);
+
+	#enqueueCall(fn)
+	{
+		this.#callQueue = this.#callQueue.then(async () => {
+			await this.#ready;
+			return await fn();
+		}, err => {
+			console.error("Enqueuing call failed: ", err);
+			throw err;
+		});
+
+		return this.#callQueue;
 	}
 }
 

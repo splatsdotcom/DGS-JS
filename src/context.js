@@ -3,32 +3,37 @@
  * initializes the WASM and WebGPU contexts
  */
 
-import MGSModule from './wasm/mgs.js'
-export const MGS = await MGSModule();
+import DGSModule from './wasm/dgs.js'
+export const DGS = DGSModule();
 
 //-------------------------//
 
-export const adapter = await navigator.gpu?.requestAdapter({
+export const adapter = navigator.gpu?.requestAdapter({
 	powerPreference: 'high-performance'
 });
 
-const limits = adapter?.limits;
-const features = adapter?.features;
+export const device = adapter?.then(async (adpt) => {
+	if(!adpt) 
+		return null;
 
-export const device = await adapter?.requestDevice({
-	requiredFeatures: features?.has('timestamp-query') ? ['timestamp-query'] : [],
-	requiredLimits: {
-		maxBufferSize: limits?.maxBufferSize,
-		maxStorageBufferBindingSize: limits?.maxStorageBufferBindingSize,
-		maxStorageBuffersPerShaderStage: limits?.maxStorageBuffersPerShaderStage
-	},
-});
+	const limits = adpt.limits;
+	const features = adpt.features;
 
-device?.lost.then((info) => {
-	if(info.reason === 'destroyed') //we don't need to log an error if we destroyed the device ourselves
-		return;
+	const dev = await adpt.requestDevice({
+		requiredFeatures: features.has('timestamp-query') ? ['timestamp-query'] : [],
+		requiredLimits: {
+			maxBufferSize: limits.maxBufferSize,
+			maxStorageBufferBindingSize: limits.maxStorageBufferBindingSize,
+			maxStorageBuffersPerShaderStage: limits.maxStorageBuffersPerShaderStage
+		},
+	});
 
-	throw new Error(`WebGPU device was lost with info: ${info.message}`);
+	dev.lost.then((info) => {
+		if (info.reason === 'destroyed') return;
+		throw new Error(`WebGPU device was lost with info: ${info.message}`);
+	});
+
+	return dev;
 });
 
 if(!navigator.gpu)
