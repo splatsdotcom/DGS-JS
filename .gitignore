@@ -10,6 +10,7 @@ src/wasm/mgs.js
 *.ply
 *.gs
 *.mgs
+*.dgs
 
 # macos
 *.DS_Store

@@ -3,7 +3,6 @@
 #include <memory>
 #include <iostream>
 
-#include "mgs_sorter.hpp"
 #include "mgs_decode.h"
 
 //-------------------------------------------//
@@ -80,41 +79,6 @@ EMSCRIPTEN_BINDINGS(libmgs_js)
 			return emscripten::val(emscripten::typed_memory_view(
 				self.dynamic ? self.count * 4 : 0, 
 				(const float*)self.velocities
-			));
-		}));
-
-	emscripten::class_<mgs::Sorter>("Sorter")
-		.smart_ptr<std::shared_ptr<mgs::Sorter>>("Sorter")
-
-		.constructor(emscripten::optional_override([](const std::shared_ptr<MGSgaussians>& gaussians)
-		{
-			return std::make_shared<mgs::Sorter>(gaussians);
-		}))
-
-		.function("sort", emscripten::optional_override([](mgs::Sorter& self, const emscripten::val& viewVal, const emscripten::val& projVal, float time)
-		{
-			QMmat4 view = parse_mat4(viewVal);
-			QMmat4 proj = parse_mat4(projVal);
-
-			self.sort(view, proj, time);
-		}))
-		
-		.function("sortAsyncStart", emscripten::optional_override([](mgs::Sorter& self, const emscripten::val& viewVal, const emscripten::val& projVal, float time)
-		{
-			QMmat4 view = parse_mat4(viewVal);
-			QMmat4 proj = parse_mat4(projVal);
-
-			self.sort_async_start(view, proj, time);
-		}))
-
-		.property("sortPending", &mgs::Sorter::sort_async_pending)
-		
-		.function("sortAsyncTryJoin", &mgs::Sorter::sort_async_tryjoin)
-
-		.property("latest", emscripten::optional_override([](const mgs::Sorter& self)
-		{
-			return emscripten::val(emscripten::typed_memory_view(
-				self.get_latest().size(), self.get_latest().data()
 			));
 		}));
 

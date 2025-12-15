@@ -105,11 +105,6 @@ class Camera
 
 	}
 
-	getParams()
-	{
-		return null;
-	}
-
 	_editingSomething() 
 	{
 		const el = document.activeElement;
