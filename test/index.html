@@ -9,7 +9,7 @@
       height: 100%;
       background: black;
     }
-    splat-player {
+    dgs-player {
       width: 100%;
       height: 100%;
       display: block;
@@ -17,11 +17,11 @@
   </style>
 </head>
 <body>
-  <splat-player controls debug scene="bonsai.dgs" background-color="0 0 0"></splat-player>
+  <dgs-player controls debug scene="bonsai.dgs" background-color="0 0 0"></dgs-player>
   <script type="module">
     import "../src/index.js";
 
-    const player = document.querySelector('splat-player');
+    const player = document.querySelector('dgs-player');
 
     player.setCamera('snap', {
       radius: 0.18,

@@ -9,7 +9,7 @@ import { DefaultCamera, SnapCamera, PortalCamera } from './camera.js';
 
 //-------------------------//
 
-export class SplatPlayer extends HTMLElement 
+export class DGSPlayer extends HTMLElement 
 {
 	constructor() 
 	{
@@ -527,4 +527,4 @@ export class SplatPlayer extends HTMLElement
 	}
 }
 
-customElements.define('splat-player', SplatPlayer);
+customElements.define('dgs-player', DGSPlayer);
