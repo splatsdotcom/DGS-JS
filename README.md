@@ -55,6 +55,7 @@ Coming soon!
 This project uses WebAssembly (WASM) for more optmized operations. If you wish to contribute to this project, you will need to build the WASM module yourself. To build, you will need the tools:
 - `CMake`
 - `emscripten`
+
 Then, to build the WASM, you will first need to clone the repository and initialize the submodules:
 ```bash
 git clone git@github.com:splatsdotcom/DGS-JS.git
