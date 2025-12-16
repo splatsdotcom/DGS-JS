@@ -46,7 +46,7 @@ Here is a full example rendering a single `.dgs` file:
 </body>
 </html>
 ```
-`example.dgs` can be found [here](test/example.dgs).
+`example.dgs` can be found [here](https://github.com/splatsdotcom/DGS-JS/blob/main/test/example.dgs).
 
 ## Documentation
 Coming soon!
