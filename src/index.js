@@ -229,8 +229,7 @@ export class DGSPlayer extends HTMLElement
 						else
 							this.#setScene(this.#dgs.decode(buf));
 
-						if(this.#renderer)
-							this.#renderer.setGaussians(this.#segments[0].gaussians);
+						this.#forceSegmentUpdate = true;
 					});
 				});
 			}
@@ -308,6 +307,7 @@ export class DGSPlayer extends HTMLElement
 					duration: 0.0
 				}
 			}];	
+			this.#forceSegmentUpdate = true;
 		})
 	}
 
@@ -373,6 +373,7 @@ export class DGSPlayer extends HTMLElement
 	#renderParams = {};
 
 	#segments = [];
+	#forceSegmentUpdate = false;
 
 	#lastRenderTime = null;
 	#curTime = 0.0;
@@ -417,8 +418,11 @@ export class DGSPlayer extends HTMLElement
 			segmentUpdated = true;
 		}
 
-		if(segmentUpdated)
+		if(segmentUpdated || this.#forceSegmentUpdate)
+		{
 			this.#renderer.setGaussians(segment.gaussians);
+			this.#forceSegmentUpdate = false;
+		}
 
 		if(this.#loop)
 			this.#curTime %= (duration > 0.0 ? duration : 1.0);
@@ -485,7 +489,7 @@ export class DGSPlayer extends HTMLElement
 		this.#curTime = 0.0;
 		this.#playing = this.#autoplay;
 
-		this.#renderer.setGaussians(gaussians.gaussians);
+		this.#forceSegmentUpdate = true;
 	}
 
 	#setScene(gaussians)
