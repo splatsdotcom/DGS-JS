@@ -1,3 +1,0 @@
-[submodule "csrc/external/QuickMath"]
-	path = csrc/external/QuickMath
-	url = git@github.com:frozein/QuickMath.git
