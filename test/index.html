@@ -1,61 +1,28 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>DGS Player</title>
-  <style>
-    html, body {
-      margin: 0;
-      height: 100%;
-      background: black;
-    }
-    dgs-player {
-      width: 100%;
-      height: 100%;
-      display: block;
-    }
-  </style>
+	<meta charset="UTF-8">
+	<title>DGS Player</title>
+	<style>
+		html, body
+		{
+			margin: 0;
+			height: 100%;
+			background: black;
+		}
+		dgs-player
+		{
+			width: 100%;
+			height: 100%;
+			display: block;
+		}
+	</style>
+
+	<script type="module">
+		import "../src/index.js";
+	</script>
 </head>
 <body>
-  <dgs-player controls debug scene="bonsai.dgs" background-color="0 0 0"></dgs-player>
-  <script type="module">
-    import "../src/index.js";
-
-    const player = document.querySelector('dgs-player');
-
-    player.setCamera('snap', {
-      radius: 0.18,
-      maxRadius: 0.25,
-      minRadius: 0.18,
-      baseTheta: Math.PI,
-      basePhi: -0.2,
-      theta: Math.PI,
-      phi: -0.2,
-      targetX: -0.00,
-      targetY: -0.02,
-      targetZ: 0.22,
-      resistance: 0.7,
-      deadZone: 0.1,
-      snapSmoothness: 0.9925,
-      valueSmoothness: 0.9925,
-      fov: 45,
-    });
-
-    player.onSegmentEnd = (last) => {
-      if(last)
-        console.log('finished last segment!')
-      else
-        console.log('finished segment!');
-    }
-
-    for(let i = 0; i < 25; i++)
-    {
-      const response = await fetch(`fashion/${i}.dgs`);
-      if(!response.ok)
-        throw new Error("Failed to fetch buffer at ");
-
-      player.enqueue(await response.arrayBuffer());
-    }
-  </script>
+	<dgs-player autoplay loop controls src="example.dgs"></dgs-player>
 </body>
 </html>

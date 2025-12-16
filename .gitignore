@@ -8,9 +8,7 @@ src/wasm/dgs.js
 .vscode/
 
 # assets for testing
-*.ply
-*.gs
-*.dgs
+test/splats
 
 # macos
 *.DS_Store
