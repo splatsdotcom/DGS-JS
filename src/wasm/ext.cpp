@@ -3,7 +3,7 @@
 #include <memory>
 #include <iostream>
 
-#include "mgs_decode.h"
+#include "dgs_decode.h"
 
 //-------------------------------------------//
 
@@ -13,26 +13,26 @@ static QMmat4 parse_mat4(const emscripten::val& val);
 
 EMSCRIPTEN_BINDINGS(libdgs_js)
 {
-	emscripten::class_<MGSgaussians>("Gaussians")
-		.smart_ptr<std::shared_ptr<MGSgaussians>>("Gaussians")
+	emscripten::class_<DGSgaussians>("Gaussians")
+		.smart_ptr<std::shared_ptr<DGSgaussians>>("Gaussians")
 
 		.constructor(emscripten::optional_override([]()
 		{
-			auto gaussians = std::make_shared<MGSgaussians>();
-			std::memset(gaussians.get(), 0, sizeof(MGSgaussians));
+			auto gaussians = std::make_shared<DGSgaussians>();
+			std::memset(gaussians.get(), 0, sizeof(DGSgaussians));
 
 			return gaussians;
 		}))
 
-    	.property("length", &MGSgaussians::count)
-    	.property("shDegree", &MGSgaussians::shDegree)
-    	.property("dynamic", &MGSgaussians::dynamic)
-    	.property("colorMin", &MGSgaussians::colorMin)
-    	.property("colorMax", &MGSgaussians::colorMax)
-    	.property("shMin", &MGSgaussians::shMin)
-    	.property("shMax", &MGSgaussians::shMax)
+    	.property("length", &DGSgaussians::count)
+    	.property("shDegree", &DGSgaussians::shDegree)
+    	.property("dynamic", &DGSgaussians::dynamic)
+    	.property("colorMin", &DGSgaussians::colorMin)
+    	.property("colorMax", &DGSgaussians::colorMax)
+    	.property("shMin", &DGSgaussians::shMin)
+    	.property("shMax", &DGSgaussians::shMax)
 
-		.property("means", emscripten::optional_override([](const MGSgaussians& self)
+		.property("means", emscripten::optional_override([](const DGSgaussians& self)
 		{
 			return emscripten::val(emscripten::typed_memory_view(
 				self.count * 4, 
@@ -40,7 +40,7 @@ EMSCRIPTEN_BINDINGS(libdgs_js)
 			));
 		}))
 
-		.property("covariances", emscripten::optional_override([](const MGSgaussians& self)
+		.property("covariances", emscripten::optional_override([](const DGSgaussians& self)
 		{
 			return emscripten::val(emscripten::typed_memory_view(
 				self.count * 6, 
@@ -48,7 +48,7 @@ EMSCRIPTEN_BINDINGS(libdgs_js)
 			));
 		}))
 
-		.property("opacities", emscripten::optional_override([](const MGSgaussians& self)
+		.property("opacities", emscripten::optional_override([](const DGSgaussians& self)
 		{
 			return emscripten::val(emscripten::typed_memory_view(
 				self.count, 
@@ -56,7 +56,7 @@ EMSCRIPTEN_BINDINGS(libdgs_js)
 			));
 		}))
 
-		.property("colors", emscripten::optional_override([](const MGSgaussians& self)
+		.property("colors", emscripten::optional_override([](const DGSgaussians& self)
 		{
 			return emscripten::val(emscripten::typed_memory_view(
 				self.count * 3, 
@@ -64,7 +64,7 @@ EMSCRIPTEN_BINDINGS(libdgs_js)
 			));
 		}))
 
-		.property("shs", emscripten::optional_override([](const MGSgaussians& self)
+		.property("shs", emscripten::optional_override([](const DGSgaussians& self)
 		{
 			uint32_t numShCoeffs = (self.shDegree + 1) * (self.shDegree + 1) - 1;
 
@@ -74,7 +74,7 @@ EMSCRIPTEN_BINDINGS(libdgs_js)
 			));
 		}))
 
-		.property("velocities", emscripten::optional_override([](const MGSgaussians& self)
+		.property("velocities", emscripten::optional_override([](const DGSgaussians& self)
 		{
 			return emscripten::val(emscripten::typed_memory_view(
 				self.dynamic ? self.count * 4 : 0, 
@@ -82,8 +82,8 @@ EMSCRIPTEN_BINDINGS(libdgs_js)
 			));
 		}));
 
-	emscripten::value_object<MGSmetadata>("Metadata")
-		.field("duration", &MGSmetadata::duration);
+	emscripten::value_object<DGSmetadata>("Metadata")
+		.field("duration", &DGSmetadata::duration);
 
 	emscripten::function("decode", emscripten::optional_override([](const emscripten::val& arg)
 	{
@@ -92,18 +92,18 @@ EMSCRIPTEN_BINDINGS(libdgs_js)
 		emscripten::val bufView = emscripten::val::global("Uint8Array").new_(arg);
 		std::vector<uint8_t> data = emscripten::convertJSArrayToNumberVector<uint8_t>(bufView);
 
-		auto gaussians = std::shared_ptr<MGSgaussians>(
-			new MGSgaussians(),
-			[](MGSgaussians* p) {
-				mgs_gaussians_free(p);
+		auto gaussians = std::shared_ptr<DGSgaussians>(
+			new DGSgaussians(),
+			[](DGSgaussians* p) {
+				dgs_gaussians_free(p);
 				delete p;
 			}
 		);
 
-		MGSmetadata metadata;
-		MGSerror error = mgs_decode_from_buffer(data.size(), data.data(), gaussians.get(), &metadata);
-		if(error != MGS_SUCCESS)
-			throw std::runtime_error("DGS internal error: \"" + std::string(mgs_error_get_description(error)) + "\"");
+		DGSmetadata metadata;
+		DGSerror error = dgs_decode_from_buffer(data.size(), data.data(), gaussians.get(), &metadata);
+		if(error != DGS_SUCCESS)
+			throw std::runtime_error("DGS internal error: \"" + std::string(dgs_error_get_description(error)) + "\"");
 
 		//wrap into js object:
 		//---------------
@@ -114,13 +114,13 @@ EMSCRIPTEN_BINDINGS(libdgs_js)
 		return result;
 	}));
 
-	emscripten::function("combine", emscripten::optional_override([](const std::shared_ptr<MGSgaussians>& g1, const std::shared_ptr<MGSgaussians>& g2)
+	emscripten::function("combine", emscripten::optional_override([](const std::shared_ptr<DGSgaussians>& g1, const std::shared_ptr<DGSgaussians>& g2)
 	{
-		std::shared_ptr<MGSgaussians> out = std::make_shared<MGSgaussians>();
+		std::shared_ptr<DGSgaussians> out = std::make_shared<DGSgaussians>();
 
-		MGSerror error = mgs_gaussians_combine(g1.get(), g2.get(), out.get());
-		if(error != MGS_SUCCESS)
-			throw std::runtime_error("DGS internal error: \"" + std::string(mgs_error_get_description(error)) + "\"");
+		DGSerror error = dgs_gaussians_combine(g1.get(), g2.get(), out.get());
+		if(error != DGS_SUCCESS)
+			throw std::runtime_error("DGS internal error: \"" + std::string(dgs_error_get_description(error)) + "\"");
 
 		return out;
 	}));

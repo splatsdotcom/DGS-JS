@@ -9,10 +9,10 @@ project(dgs VERSION 1.0)
 set(dgs_src
 	"ext.cpp"
 
-	"MGS/csrc/src/mgs_error.c"
-	"MGS/csrc/src/mgs_gaussians.c"
-	"MGS/csrc/src/mgs_encode.c"
-	"MGS/csrc/src/mgs_decode.c"
+	"DGS/csrc/src/dgs_error.c"
+	"DGS/csrc/src/dgs_gaussians.c"
+	"DGS/csrc/src/dgs_encode.c"
+	"DGS/csrc/src/dgs_decode.c"
 )
 
 # create executable:
@@ -20,8 +20,8 @@ set(dgs_src
 add_executable(${PROJECT_NAME} ${dgs_src})
 
 include_directories(${PROJECT_NAME}
-	"MGS/csrc/include"
-	"MGS/csrc/external"
+	"DGS/csrc/include"
+	"DGS/csrc/external"
 )
 
 # set emscripten flags:
