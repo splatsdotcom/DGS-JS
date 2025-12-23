@@ -1,6 +1,3 @@
-[submodule "src/wasm/MGS"]
-	path = src/wasm/MGS
-	url = git@github.com:True3DLabs/MGS.git
 [submodule "src/wasm/DGS"]
 	path = src/wasm/DGS
 	url = git@github.com:splatsdotcom/DGS.git
