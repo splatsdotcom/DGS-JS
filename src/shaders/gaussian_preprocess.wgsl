@@ -46,6 +46,8 @@ struct Params
 	focalLengths: vec2f,
 	viewPort: vec2f,
 
+	scaleMin: f32,
+	scaleMax: f32,
 	colorMin: f32,
 	colorMax: f32,
 	shMin: f32,
@@ -73,21 +75,31 @@ struct RenderedGaussian
 @group(0) @binding(0) var<uniform> u_params: Params;
 
 @group(0) @binding(1) var<storage, read> u_means         : array<vec4f>;
-@group(0) @binding(2) var<storage, read> u_covariances   : array<f32>;
-@group(0) @binding(3) var<storage, read> u_opacities     : array<u32>;
-@group(0) @binding(4) var<storage, read> u_colors        : array<u32>;
-@group(0) @binding(5) var<storage, read> u_shs           : array<u32>;
-@group(0) @binding(6) var<storage, read> u_velocities    : array<vec4f>;
-@group(0) @binding(7) var<storage, read> u_sortedIndices : array<u32>;
+@group(0) @binding(2) var<storage, read> u_scales        : array<u32>;
+@group(0) @binding(3) var<storage, read> u_rotations     : array<u32>;
+@group(0) @binding(4) var<storage, read> u_opacities     : array<u32>;
+@group(0) @binding(5) var<storage, read> u_colors        : array<u32>;
+@group(0) @binding(6) var<storage, read> u_shs           : array<u32>;
+@group(0) @binding(7) var<storage, read> u_velocities    : array<vec4f>;
+@group(0) @binding(8) var<storage, read> u_sortedIndices : array<u32>;
 
-@group(0) @binding(8) var<storage, read_write> u_renderedGaussians: array<RenderedGaussian>;
+@group(0) @binding(9) var<storage, read_write> u_renderedGaussians: array<RenderedGaussian>;
 
 var<workgroup> s_numGaussians: atomic<u32>;
 var<workgroup> s_writePosWorkgroup: u32;
 
 //-------------------------//
 
-fn get_sh_coeffs(gaussianIdx: u32, i: u32) -> vec3f
+fn read_vec3_unorm16(buf: ptr<storage, array<u32>, read>, idx: u32) -> vec3f
+{
+	return vec3f(vec3u(
+		(buf[(idx * 3 + 0) / 2] >> (((idx * 3 + 0) % 2) * 16)) & 0xFFFF,
+		(buf[(idx * 3 + 1) / 2] >> (((idx * 3 + 1) % 2) * 16)) & 0xFFFF,
+		(buf[(idx * 3 + 2) / 2] >> (((idx * 3 + 2) % 2) * 16)) & 0xFFFF
+	)) / 0xFFFF;
+}
+
+fn read_sh_coeffs(gaussianIdx: u32, i: u32) -> vec3f
 {
 	let numCoeffs = (u_params.shDegree + 1) * (u_params.shDegree + 1) - 1;
 	let idx = (gaussianIdx * numCoeffs + i - 1) * 3;
@@ -100,6 +112,38 @@ fn get_sh_coeffs(gaussianIdx: u32, i: u32) -> vec3f
 
 	return (vec3f(shRead) / 0xFF) * (u_params.shMax - u_params.shMin) + u_params.shMin;
 }
+
+fn quat_to_mat4(q: vec4f) -> mat3x3f
+{
+	let x2  = q.x + q.x;
+    let y2  = q.y + q.y;
+    let z2  = q.z + q.z;
+    let xx2 = q.x * x2;
+    let xy2 = q.x * y2;
+    let xz2 = q.x * z2;
+    let yy2 = q.y * y2;
+    let yz2 = q.y * z2;
+    let zz2 = q.z * z2;
+    let sx2 = q.w * x2;
+    let sy2 = q.w * y2;
+    let sz2 = q.w * z2;
+
+	var result: mat3x3f;
+
+	result[0][0] = 1.0 - (yy2 + zz2);
+	result[0][1] = xy2 - sz2;
+	result[0][2] = xz2 + sy2;
+	result[1][0] = xy2 + sz2;
+	result[1][1] = 1.0 - (xx2 + zz2);
+	result[1][2] = yz2 - sx2;
+	result[2][0] = xz2 - sy2;
+	result[2][1] = yz2 + sx2;
+	result[2][2] = 1.0 - (xx2 + yy2);
+
+	return result;
+}
+
+//-------------------------//
 
 @compute @workgroup_size(WORKGROUP_SIZE) 
 fn preprocess(@builtin(global_invocation_id) GID: vec3u, @builtin(local_invocation_id) LID: vec3u)
@@ -126,18 +170,20 @@ fn preprocess(@builtin(global_invocation_id) GID: vec3u, @builtin(local_invocati
 
 	//unpack covariance matrix:
 	//---------------
-	let c0 = u_covariances[idx * 6 + 0];
-	let c1 = u_covariances[idx * 6 + 1];
-	let c2 = u_covariances[idx * 6 + 2];
-	let c3 = u_covariances[idx * 6 + 3];
-	let c4 = u_covariances[idx * 6 + 4];
-	let c5 = u_covariances[idx * 6 + 5];
-
-	let cov = mat3x3f(
-		vec3f(c0, c1, c2),
-		vec3f(c1, c3, c4),
-		vec3f(c2, c4, c5)
+	let scales = exp(
+		read_vec3_unorm16(&u_scales, idx) * (u_params.scaleMax - u_params.scaleMin) + u_params.scaleMin
 	);
+	let rots = read_vec3_unorm16(&u_rotations, idx) * 2.0 - 1.0;
+
+	let scaleMat = mat3x3f(
+		scales.x, 0.0, 0.0,
+		0.0, scales.y, 0.0,
+		0.0, 0.0, scales.z
+	);
+	let rotMat = quat_to_mat4(vec4f(rots, sqrt(1.0 - dot(rots, rots))));
+
+	let M = scaleMat * rotMat;
+	let cov = 4.0 * transpose(M) * M;
 
 	//project covariance matrix to 2D:
 	//---------------
@@ -172,13 +218,7 @@ fn preprocess(@builtin(global_invocation_id) GID: vec3u, @builtin(local_invocati
 
 	//evalate sh:
 	//---------------
-	let dcRead = vec3u(
-		(u_colors[(idx * 3 + 0) / 2] >> (((idx * 3 + 0) % 2) * 16)) & 0xFFFF,
-		(u_colors[(idx * 3 + 1) / 2] >> (((idx * 3 + 1) % 2) * 16)) & 0xFFFF,
-		(u_colors[(idx * 3 + 2) / 2] >> (((idx * 3 + 2) % 2) * 16)) & 0xFFFF
-	);
-
-	let dc = (vec3f(dcRead) / f32(0xFFFF)) * (u_params.colorMax - u_params.colorMin) + u_params.colorMin;
+	let dc = read_vec3_unorm16(&u_colors, idx) * (u_params.colorMax - u_params.colorMin) + u_params.colorMin;
 	let dir = normalize(mean.xyz - u_params.camPos);
 
 	var color = SH_C0 * dc;
@@ -187,9 +227,9 @@ fn preprocess(@builtin(global_invocation_id) GID: vec3u, @builtin(local_invocati
 		let x = dir.x;
 		let y = dir.y;
 		let z = dir.z;
-		color += -SH_C1 * y * get_sh_coeffs(idx, 1) + 
-		          SH_C1 * z * get_sh_coeffs(idx, 2) - 
-		          SH_C1 * x * get_sh_coeffs(idx, 3);
+		color += -SH_C1 * y * read_sh_coeffs(idx, 1) + 
+		          SH_C1 * z * read_sh_coeffs(idx, 2) - 
+		          SH_C1 * x * read_sh_coeffs(idx, 3);
 
 		if(u_params.shDegree > 1)
 		{
@@ -200,21 +240,21 @@ fn preprocess(@builtin(global_invocation_id) GID: vec3u, @builtin(local_invocati
             let yz = dir.y * dir.z;
             let xz = dir.x * dir.z;
 
-            color += SH_C2[0] * xy                   * get_sh_coeffs(idx, 4) + 
-			         SH_C2[1] * yz                   * get_sh_coeffs(idx, 5) + 
-			         SH_C2[2] * (2.0 * zz - xx - yy) * get_sh_coeffs(idx, 6) + 
-			         SH_C2[3] * xz                   * get_sh_coeffs(idx, 7) + 
-			         SH_C2[4] * (xx - yy)            * get_sh_coeffs(idx, 8);
+            color += SH_C2[0] * xy                   * read_sh_coeffs(idx, 4) + 
+			         SH_C2[1] * yz                   * read_sh_coeffs(idx, 5) + 
+			         SH_C2[2] * (2.0 * zz - xx - yy) * read_sh_coeffs(idx, 6) + 
+			         SH_C2[3] * xz                   * read_sh_coeffs(idx, 7) + 
+			         SH_C2[4] * (xx - yy)            * read_sh_coeffs(idx, 8);
 
 			if(u_params.shDegree > 2)
 			{
-				color += SH_C3[0] * y * (3.0 * xx - yy)                  * get_sh_coeffs(idx,  9) + 
-				         SH_C3[1] * xy * z                               * get_sh_coeffs(idx, 10) + 
-				         SH_C3[2] * y * (4.0 * zz - xx - yy)             * get_sh_coeffs(idx, 11) + 
-				         SH_C3[3] * z * (2.0 * zz - 3.0 * xx - 3.0 * yy) * get_sh_coeffs(idx, 12) + 
-				         SH_C3[4] * x * (4.0 * zz - xx - yy)             * get_sh_coeffs(idx, 13) + 
-				         SH_C3[5] * z * (xx - yy)                        * get_sh_coeffs(idx, 14) + 
-				         SH_C3[6] * x * (xx - 3.0 * yy)                  * get_sh_coeffs(idx, 15);
+				color += SH_C3[0] * y * (3.0 * xx - yy)                  * read_sh_coeffs(idx,  9) + 
+				         SH_C3[1] * xy * z                               * read_sh_coeffs(idx, 10) + 
+				         SH_C3[2] * y * (4.0 * zz - xx - yy)             * read_sh_coeffs(idx, 11) + 
+				         SH_C3[3] * z * (2.0 * zz - 3.0 * xx - 3.0 * yy) * read_sh_coeffs(idx, 12) + 
+				         SH_C3[4] * x * (4.0 * zz - xx - yy)             * read_sh_coeffs(idx, 13) + 
+				         SH_C3[5] * z * (xx - yy)                        * read_sh_coeffs(idx, 14) + 
+				         SH_C3[6] * x * (xx - 3.0 * yy)                  * read_sh_coeffs(idx, 15);
 			}
 		}
 	}

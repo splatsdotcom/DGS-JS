@@ -207,9 +207,9 @@ export class DGSPlayer extends HTMLElement
 				this.#fetchBuf(newValue).then((buf) => {
 					this.#enqueueCall(() => {
 						if(newValue.endsWith('.ply'))
-							this.#setSrc(this.#dgs.loadPly(buf));
+							this.#setSrc(this.#loadPly(buf));
 						else
-							this.#setSrc(this.#dgs.decode(buf));
+							this.#setSrc(this.#decode(buf));
 					});
 				});
 			}
@@ -225,9 +225,9 @@ export class DGSPlayer extends HTMLElement
 				this.#fetchBuf(newValue).then((buf) => {
 					this.#enqueueCall(() => {
 						if(newValue.endsWith('.ply'))
-							this.#setScene(this.#dgs.loadPly(buf));
+							this.#setScene(this.#loadPly(buf));
 						else
-							this.#setScene(this.#dgs.decode(buf));
+							this.#setScene(this.#decode(buf));
 
 						this.#forceSegmentUpdate = true;
 					});
@@ -294,7 +294,7 @@ export class DGSPlayer extends HTMLElement
 		//TODO: if decoding becomes expensive, we may need to run this on a background thread?
 
 		this.#enqueueCall(() => {
-			this.#segments.push(this.#dgs.decode(buf));
+			this.#segments.push(this.#decode(buf));
 		});
 	}
 
@@ -495,6 +495,30 @@ export class DGSPlayer extends HTMLElement
 	#setScene(gaussians)
 	{
 		this.#renderer.setScene(gaussians.gaussians);
+	}
+
+	#decode(buf)
+	{
+		try
+		{
+			return this.#dgs.decode(buf);
+		}
+		catch(e)
+		{
+			throw new Error('Failed to decode .dgs file, see the above stack trace for details: ' + e);
+		}
+	}
+
+	#loadPly(buf)
+	{
+		try
+		{
+			return this.#dgs.loadPly(buf);
+		}
+		catch(e)
+		{
+			throw new Error('Failed to load .ply file, see the above stack trace for details: ' + e);
+		}
 	}
 
 	async #fetchBuf(url)
