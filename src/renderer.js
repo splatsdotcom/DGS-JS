@@ -485,11 +485,12 @@ class Renderer
 		size += 1 * SIZEOF_UINT32;      // sh degree
 		size += 2 * SIZEOF_FLOAT32;     // focal lengths
 		size += 2 * SIZEOF_FLOAT32;     // viewport
+		size += 2 * SIZEOF_FLOAT32;     // min/max scale
 		size += 2 * SIZEOF_FLOAT32;     // min/max color
 		size += 2 * SIZEOF_FLOAT32;     // min/max sh
 		size += 1 * SIZEOF_UINT32;      // dynamic
 		size += 1 * SIZEOF_FLOAT32;     // time
-		size += 2 * SIZEOF_UINT32;      // num gaussians + padding
+		size += 4 * SIZEOF_UINT32;      // num gaussians + padding
 
 		return this.#device.createBuffer({
 			label: 'params',
@@ -501,81 +502,48 @@ class Renderer
 
 	#createGaussianBufs(gaussians)
 	{
-		const renderedGaussianSize = 12 * SIZEOF_FLOAT32;
+		const bufs = {};
 
-		const meansBuf = this.#maybeReuseBuf(this.#gaussianBufs?.means, {
-			label: 'means',
-
-			size: gaussians.means.byteLength,
-			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
-		});
-		this.#device.queue.writeBuffer(meansBuf, 0, gaussians.means);
-
-		const covsBuf = this.#maybeReuseBuf(this.#gaussianBufs?.covariances, {
-			label: 'covariances',
-
-			size: gaussians.covariances.byteLength,
-			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
-		});
-		this.#device.queue.writeBuffer(covsBuf, 0, gaussians.covariances);
-
-		const opacitiesBuf = this.#maybeReuseBuf(this.#gaussianBufs?.opacities, {
-			label: 'opacities',
-
-			size: this.#alignNonzero(gaussians.opacities.byteLength, SIZEOF_UINT32),
-			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
-		});
-		this.#writeBufferUnaligned(opacitiesBuf, gaussians.opacities);
-
-		const colorsBuf = this.#maybeReuseBuf(this.#gaussianBufs?.colors, {
-			label: 'colors',
-
-			size: this.#alignNonzero(gaussians.colors.byteLength, SIZEOF_UINT32),
-			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
-		});
-		this.#writeBufferUnaligned(colorsBuf, gaussians.colors);
-
-		const shsBuf = this.#maybeReuseBuf(this.#gaussianBufs?.shs, {
-			label: 'spherical harmomics',
-
-			size: this.#alignNonzero(gaussians.shs.byteLength, SIZEOF_UINT32),
-			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
-		});
-		this.#writeBufferUnaligned(shsBuf, gaussians.shs);
-
-		const velocitiesBuf = this.#maybeReuseBuf(this.#gaussianBufs?.velocities, {
-			label: 'velocities',
-
-			size: Math.max(gaussians.velocities.byteLength, 4 * SIZEOF_FLOAT32),
-			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
-		});
-		this.#device.queue.writeBuffer(velocitiesBuf, 0, gaussians.velocities);
+		//create data bufs:
+		//---------------
+		const properties = [
+			{ name: 'means'     , alignment: 4 * SIZEOF_FLOAT32 },
+			{ name: 'scales'    , alignment:     SIZEOF_UINT32  },
+			{ name: 'rotations' , alignment:     SIZEOF_UINT32  },
+			{ name: 'opacities' , alignment:     SIZEOF_UINT32  },
+			{ name: 'colors'    , alignment:     SIZEOF_UINT32  },
+			{ name: 'shs'       , alignment:     SIZEOF_UINT32  },
+			{ name: 'velocities', alignment: 4 * SIZEOF_FLOAT32 },
+		]
 		
-		const sortedIndicesBuf = this.#maybeReuseBuf(this.#gaussianBufs?.sortedIndices, {
+		properties.forEach((prop) => {
+			bufs[prop.name] = this.#maybeReuseBuf(this.#gaussianBufs?.[prop.name], {
+				label: prop.name,
+
+				size: this.#alignNonzero(gaussians[prop.name].byteLength, prop.alignment),
+				usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+			});
+			this.#writeBufferUnaligned(bufs[prop.name], gaussians[prop.name]);
+		})
+
+		//create render bufs:
+		//---------------
+		bufs.sortedIndices = this.#maybeReuseBuf(this.#gaussianBufs?.sortedIndices, {
 			label: 'sorted indices',
 
-			size: gaussians.length * SIZEOF_UINT32,
+			size: Math.max(gaussians.length, 1) * SIZEOF_UINT32,
 			usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE
 		});
-
-		const renderedGaussianBuf = this.#maybeReuseBuf(this.#gaussianBufs?.rendered, {
+		bufs.rendered = this.#maybeReuseBuf(this.#gaussianBufs?.rendered, {
 			label: 'rendered gaussians',
 
-			size: gaussians.length * renderedGaussianSize,
+			size: Math.max(gaussians.length, 1) * 12 * SIZEOF_FLOAT32,
 			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.INDIRECT
 		});
 
-		return {
-			means: meansBuf,
-			covariances: covsBuf,
-			opacities: opacitiesBuf,
-			colors: colorsBuf,
-			shs: shsBuf,
-			velocities: velocitiesBuf,
-			sortedIndices: sortedIndicesBuf,
-
-			rendered: renderedGaussianBuf
-		};
+		//return:
+		//---------------
+		return bufs
 	}
 
 	#updateParamsBuffer(view, proj, camPos, focalLengths, viewPort, time)
@@ -602,6 +570,9 @@ class Renderer
 		offset += 2;
 
 		fData.set(viewPort, offset);
+		offset += 2;
+
+		fData.set([this.#gaussians.scaleMin, this.#gaussians.scaleMax], offset);
 		offset += 2;
 
 		fData.set([this.#gaussians.colorMin, this.#gaussians.colorMax], offset);
@@ -632,14 +603,15 @@ class Renderer
 				{ binding: 0, resource: { buffer: this.#paramsBuf } },
 
 				{ binding: 1, resource: { buffer: this.#gaussianBufs.means } },
-				{ binding: 2, resource: { buffer: this.#gaussianBufs.covariances } },
-				{ binding: 3, resource: { buffer: this.#gaussianBufs.opacities } },
-				{ binding: 4, resource: { buffer: this.#gaussianBufs.colors } },
-				{ binding: 5, resource: { buffer: this.#gaussianBufs.shs } },
-				{ binding: 6, resource: { buffer: this.#gaussianBufs.velocities } },
-				{ binding: 7, resource: { buffer: this.#gaussianBufs.sortedIndices } },
+				{ binding: 2, resource: { buffer: this.#gaussianBufs.scales } },
+				{ binding: 3, resource: { buffer: this.#gaussianBufs.rotations } },
+				{ binding: 4, resource: { buffer: this.#gaussianBufs.opacities } },
+				{ binding: 5, resource: { buffer: this.#gaussianBufs.colors } },
+				{ binding: 6, resource: { buffer: this.#gaussianBufs.shs } },
+				{ binding: 7, resource: { buffer: this.#gaussianBufs.velocities } },
+				{ binding: 8, resource: { buffer: this.#gaussianBufs.sortedIndices } },
 
-				{ binding: 8, resource: { buffer: this.#gaussianBufs.rendered } }
+				{ binding: 9, resource: { buffer: this.#gaussianBufs.rendered } }
 			]
 		});
 

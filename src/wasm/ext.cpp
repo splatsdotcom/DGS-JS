@@ -27,6 +27,8 @@ EMSCRIPTEN_BINDINGS(libdgs_js)
     	.property("length", &DGSgaussians::count)
     	.property("shDegree", &DGSgaussians::shDegree)
     	.property("dynamic", &DGSgaussians::dynamic)
+    	.property("scaleMin", &DGSgaussians::scaleMin)
+    	.property("scaleMax", &DGSgaussians::scaleMax)
     	.property("colorMin", &DGSgaussians::colorMin)
     	.property("colorMax", &DGSgaussians::colorMax)
     	.property("shMin", &DGSgaussians::shMin)
@@ -40,11 +42,19 @@ EMSCRIPTEN_BINDINGS(libdgs_js)
 			));
 		}))
 
-		.property("covariances", emscripten::optional_override([](const DGSgaussians& self)
+		.property("scales", emscripten::optional_override([](const DGSgaussians& self)
 		{
 			return emscripten::val(emscripten::typed_memory_view(
-				self.count * 6, 
-				(const float*)self.covariances
+				self.count * 3, 
+				(const uint16_t*)self.scales
+			));
+		}))
+
+		.property("rotations", emscripten::optional_override([](const DGSgaussians& self)
+		{
+			return emscripten::val(emscripten::typed_memory_view(
+				self.count * 3, 
+				(const uint16_t*)self.rotations
 			));
 		}))
 
