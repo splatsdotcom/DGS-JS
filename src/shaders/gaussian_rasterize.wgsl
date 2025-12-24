@@ -13,7 +13,9 @@ struct Params
 	time: f32,
 
 	focalLengths: vec2f,
-	viewPort: vec2f
+	viewPort: vec2f,
+
+	pointModeSize: f32
 };
 
 struct RenderedGaussian
@@ -70,6 +72,13 @@ fn fs(in: VertexOutput) -> @location(0) vec4f
 		discard;
 	}
 
-	let b = exp(a) * in.color.a;
-	return vec4f(in.color.rgb * b, b);
+	if(u_params.pointModeSize > 0.0)
+	{
+		return in.color;
+	}
+	else
+	{
+		let b = exp(a) * in.color.a;
+		return vec4f(in.color.rgb * b, b);
+	}
 }
