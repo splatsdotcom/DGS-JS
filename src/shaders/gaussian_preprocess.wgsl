@@ -40,23 +40,23 @@ struct Params
 	view: mat4x4f,
 	proj: mat4x4f,
 	camPos: vec3f,
-
-	shDegree: u32,
+	time: f32,
 
 	focalLengths: vec2f,
 	viewPort: vec2f,
 
+	pointModeSize: f32,
+
+	numGaussians: u32,
+	dynamic: u32,
+	shDegree: u32,
+	
 	scaleMin: f32,
 	scaleMax: f32,
 	colorMin: f32,
 	colorMax: f32,
 	shMin: f32,
-	shMax: f32,
-
-	dynamic: u32,
-	time: f32,
-
-	numGaussians: u32
+	shMax: f32
 };
 
 struct RenderedGaussian
@@ -213,8 +213,18 @@ fn preprocess(@builtin(global_invocation_id) GID: vec3u, @builtin(local_invocati
 	let v1 = normalize(vec2f(cov2d[0][1], lambda1 - cov2d[0][0]));
 	let v2 = vec2f(v1.y, -v1.x);
 
-	let major = min(sqrt(2.0 * lambda1), 1024.0) * v1;
-	let minor = min(sqrt(2.0 * lambda2), 1024.0) * v2;
+	var major: vec2f;
+	var minor: vec2f;
+	if(u_params.pointModeSize > 0.0)
+	{
+		major = vec2f(0.0, u_params.pointModeSize);
+		minor = vec2f(u_params.pointModeSize, 0.0);
+	}
+	else
+	{
+		major = min(sqrt(2.0 * lambda1), 1024.0) * v1;
+		minor = min(sqrt(2.0 * lambda2), 1024.0) * v2;
+	}
 
 	//evalate sh:
 	//---------------
