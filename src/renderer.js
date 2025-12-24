@@ -83,6 +83,11 @@ class Renderer
 		this.#scene = gaussians;
 	}
 
+	setPointSize(pointSize)
+	{
+		this.#pointModeSize = pointSize;
+	}
+
 	draw(view, proj, time, params = {}, profile = false)
 	{
 		if(!this.#gaussians)
@@ -277,6 +282,8 @@ class Renderer
 
 	#scene = null;
 	#gaussians = null;
+	#pointModeSize = null;
+
 	#gaussianBufs = null;
 	#geomBufs = null;
 	#paramsBuf = null;
@@ -482,15 +489,17 @@ class Renderer
 		size += 4 * 4 * SIZEOF_FLOAT32; // view
 		size += 4 * 4 * SIZEOF_FLOAT32; // proj
 		size += 3 * SIZEOF_FLOAT32;     // cam pos
-		size += 1 * SIZEOF_UINT32;      // sh degree
+		size += 1 * SIZEOF_FLOAT32;     // time
 		size += 2 * SIZEOF_FLOAT32;     // focal lengths
 		size += 2 * SIZEOF_FLOAT32;     // viewport
+		size += 1 * SIZEOF_FLOAT32;     // point mode size
+		size += 1 * SIZEOF_UINT32;      // num gaussians
+		size += 1 * SIZEOF_UINT32;      // dynamic
+		size += 1 * SIZEOF_UINT32;      // sh degree
 		size += 2 * SIZEOF_FLOAT32;     // min/max scale
 		size += 2 * SIZEOF_FLOAT32;     // min/max color
 		size += 2 * SIZEOF_FLOAT32;     // min/max sh
-		size += 1 * SIZEOF_UINT32;      // dynamic
-		size += 1 * SIZEOF_FLOAT32;     // time
-		size += 4 * SIZEOF_UINT32;      // num gaussians + padding
+		size += 2 * SIZEOF_UINT32;      // padding
 
 		return this.#device.createBuffer({
 			label: 'params',
@@ -563,7 +572,7 @@ class Renderer
 		fData.set(camPos, offset);
 		offset += 3;
 
-		uData.set([this.#gaussians.shDegree], offset);
+		fData.set([time], offset);
 		offset += 1;
 
 		fData.set(focalLengths, offset);
@@ -571,6 +580,18 @@ class Renderer
 
 		fData.set(viewPort, offset);
 		offset += 2;
+
+		fData.set([this.#pointModeSize ?? 0.0], offset);
+		offset += 1;
+
+		uData.set([this.#numGaussiansVisible], offset);
+		offset += 1;
+
+		uData.set([Number(this.#gaussians.dynamic)], offset);
+		offset += 1;
+
+		uData.set([this.#gaussians.shDegree], offset);
+		offset += 1;
 
 		fData.set([this.#gaussians.scaleMin, this.#gaussians.scaleMax], offset);
 		offset += 2;
@@ -580,15 +601,6 @@ class Renderer
 
 		fData.set([this.#gaussians.shMin, this.#gaussians.shMax], offset);
 		offset += 2;
-
-		uData.set([Number(this.#gaussians.dynamic)], offset);
-		offset += 1;
-
-		fData.set([time], offset);
-		offset += 1;
-
-		uData.set([this.#numGaussiansVisible], offset);
-		offset += 1;
 
 		this.#device.queue.writeBuffer(this.#paramsBuf, 0, data);
 	}

@@ -137,15 +137,17 @@ export class DGSPlayer extends HTMLElement
 		});
 
 		this.#controlsOverlay.appendChild(this.#scrubber);
-	}
 
-	connectedCallback() 
-	{
 		//create renderer + camera:
 		//---------------
 		this.#renderer = new Renderer(this.#canvas);
 		this.#camera = new DefaultCamera();
+	}
 
+	connectedCallback() 
+	{
+		//start getting input from canvas:
+		//---------------
 		this.#camera.attachToCanvas(this.#canvas);
 
 		//handle window resize:
@@ -187,7 +189,8 @@ export class DGSPlayer extends HTMLElement
 		return [
 			'src', 'scene',
 			'camera', 'background-color',
-			'loop', 'autoplay', 'controls', 'debug'
+			'loop', 'autoplay', 'controls', 
+			'point-size', 'debug'
 		];
 	}
 
@@ -270,6 +273,9 @@ export class DGSPlayer extends HTMLElement
 			break;
 		case 'controls':
 			this.#controls = this.hasAttribute('controls');
+			break;
+		case 'point-size':
+			this.#renderer.setPointSize(newValue);
 			break;
 		case 'debug':
 			this.#debug = this.hasAttribute('debug');
