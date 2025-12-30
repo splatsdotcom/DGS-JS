@@ -4,7 +4,8 @@
  */
 
 const UINT16_MAX = (1 << 16) - 1;
-const CLIP_THRESHOLD = 1.2;
+const TIME_CLIP_THRESHOLD = Math.log(1.0 / 255);
+const POS_CLIP_THRESHOLD = 1.2;
 
 //-------------------------------------------//
 
@@ -64,6 +65,11 @@ onmessage = (e) => {
 			x += velocities[idx + 0] * time;
 			y += velocities[idx + 1] * time;
 			z += velocities[idx + 2] * time;
+
+			const t = time - means[idx + 3];
+			const tStdev = velocities[idx + 3];
+			if((-t * t / (2 * tStdev * tStdev)) < TIME_CLIP_THRESHOLD)
+				continue;
 		}
 
 		const cx = view[0] * x + view[4] * y + view[8]  * z + view[12];
@@ -76,7 +82,7 @@ onmessage = (e) => {
 		const pz = proj[2] * cx + proj[6] * cy + proj[10] * cz + proj[14] * cw;
 		const pw = proj[3] * cx + proj[7] * cy + proj[11] * cz + proj[15] * cw;
 
-		const clip = CLIP_THRESHOLD * pw;
+		const clip = POS_CLIP_THRESHOLD * pw;
 		if(px >  clip || py >  clip || pz >  clip ||
 		   px < -clip || py < -clip || pz < -clip)
 			continue;
