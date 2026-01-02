@@ -248,7 +248,7 @@ export class DGSPlayer extends HTMLElement
 			'src', 'scene',
 			'camera', 'background-color',
 			'loop', 'autoplay', 'controls', 
-			'point-size', 'debug'
+			'point-size', 'time-scale', 'debug'
 		];
 	}
 
@@ -331,6 +331,13 @@ export class DGSPlayer extends HTMLElement
 			break;
 		case 'controls':
 			this.#controls = this.hasAttribute('controls');
+			break;
+		case 'time-scale':
+			try
+			{
+				this.#timeScale = Number(this.getAttribute('time-scale'));
+			}
+			catch(e) { }
 			break;
 		case 'point-size':
 			this.#renderer.setPointSize(newValue);
@@ -433,6 +440,7 @@ export class DGSPlayer extends HTMLElement
 	#loop = false;
 	#autoplay = false;
 	#controls = false;
+	#timeScale = 1.0;
 	#debug = false;
 	#renderParams = {};
 
@@ -464,7 +472,7 @@ export class DGSPlayer extends HTMLElement
 			dt = renderTime - this.#lastRenderTime;
 
 		if(this.#playing && !this.#isScrubbing)
-			this.#curTime += dt;
+			this.#curTime += dt * this.#timeScale;
 
 		//update current segment:
 		//---------------
