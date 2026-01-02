@@ -51,18 +51,76 @@ export class DGSPlayer extends HTMLElement
 			display: 'none',
 			top: '1%',
 			left: '1%',
-			color: 'white',
 			background: 'rgba(0,0,0,0.4)',
 			padding: '8px 8px',
-			fontFamily: 'monospace',
-			fontSize: '12px',
 			borderRadius: '8px',
 			backdropFilter: 'blur(6px)',
-			whiteSpace: 'pre',
-			pointerEvents: 'none',
+			pointerEvents: 'auto',
 			userSelect: 'none'
 		});
 		container.appendChild(this.#debugOverlay);
+
+		this.#debugOverlayText = document.createElement('div');
+		Object.assign(this.#debugOverlayText.style, {
+			display: 'block',
+			color: 'white',
+			fontFamily: 'monospace',
+			fontSize: '12px',
+			whiteSpace: 'pre',
+			marginBottom: '10px',
+		});
+		this.#debugOverlay.appendChild(this.#debugOverlayText);
+
+		const cameraToggle = document.createElement('div');
+		cameraToggle.textContent = 'Show Camera Params ▼';
+		Object.assign(cameraToggle.style, {
+			display: 'block',
+			cursor: 'pointer',
+			color: 'white',
+			fontFamily: 'monospace',
+			fontSize: '12px'
+		});
+		this.#debugOverlay.appendChild(cameraToggle);
+
+		this.#debugOverlayCameraJSON = document.createElement('pre');
+		Object.assign(this.#debugOverlayCameraJSON.style, {
+			display: 'none',
+			color: 'white',
+			fontFamily: 'monospace',
+			fontSize: '12px',
+			whiteSpace: 'pre',
+		});
+		this.#debugOverlay.appendChild(this.#debugOverlayCameraJSON);
+
+		cameraToggle.addEventListener('click', () => {
+			if(this.#debugOverlayCameraJSON.style.display === 'none') 
+			{
+				this.#debugOverlayCameraJSON.style.display = 'block';
+				cameraToggle.textContent = 'Hide Camera Params ▲';
+			} 
+			else 
+			{
+				this.#debugOverlayCameraJSON.style.display = 'none';
+				cameraToggle.textContent = 'Show Camera Params ▼';
+			}
+		});
+
+		this.#debugOverlayCameraJSON.addEventListener('click', async () => {
+			try 
+			{
+				await navigator.clipboard.writeText(this.#debugOverlayCameraJSON.textContent);
+
+				const oldBg = this.#debugOverlayCameraJSON.style.color;
+				this.#debugOverlayCameraJSON.style.color = 'rgba(255,255,255,0.2)';
+				setTimeout(() => {
+					this.#debugOverlayCameraJSON.style.color = oldBg || 'transparent';
+				}, 200);
+			} 
+			catch (err) 
+			{
+				console.error('Failed to copy camera JSON:', err);
+			}
+		});
 
 		//create controls container:
 		//---------------
@@ -390,6 +448,8 @@ export class DGSPlayer extends HTMLElement
 	#playPauseBtn = null;
 	#scrubber = null;
 	#debugOverlay = null;
+	#debugOverlayText = null;
+	#debugOverlayCameraJSON = null;
 
 	//-------------------------//
 
@@ -469,18 +529,22 @@ export class DGSPlayer extends HTMLElement
 		const normTime = this.#curTime / (duration > 0.0 ? duration : 1.0);
 		this.#renderer.draw(view, proj, normTime, this.#renderParams, this.#debug);
 
-		//update profiling display:
+		//update debug display:
 		//---------------
-		const profile = this.#renderer.getPerformanceProfile();
+		const profile = this.#renderer.performanceProfile;
 
 		Object.assign(this.#debugOverlay.style, {
-			display: this.#debug ? 'flex' : 'none'
+			display: this.#debug ? 'block' : 'none'
 		});
-		this.#debugOverlay.textContent = 
+		this.#debugOverlayText.textContent = 
+			`Time: ${this.#curTime.toFixed(3)} / ${duration.toFixed(3)} s\n` +
+			`Num Gaussians Visible: ${this.#renderer.numGaussiansVisible} / ${this.#renderer.numGaussians}\n\n` +
 			`Frame Time: ${this.#formatProfile(profile.totalTime)}\n` +
 			`\t- Preprocess: ${this.#formatProfile(profile.preprocessTime)}\n` +
 			`\t- Raster:     ${this.#formatProfile(profile.rasterTime)}\n` +
 			`Last Sort Time: ${this.#formatProfile(profile.lastSortTime)}`;
+
+		this.#debugOverlayCameraJSON.textContent = JSON.stringify(this.#camera.getParams(), null, 2);
 
 		//loop:
 		//---------------
