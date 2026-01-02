@@ -716,7 +716,6 @@ export class SnapCamera extends Camera
 	getParams() 
 	{
 		return {
-			viewMat: this.getViewMatrix(),
 			fov: this.fov,
 
 			baseTheta: this.baseTheta,

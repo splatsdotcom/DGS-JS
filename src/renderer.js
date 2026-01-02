@@ -261,7 +261,17 @@ class Renderer
 		}
 	}
 
-	getPerformanceProfile()
+	get numGaussians()
+	{
+		return this.#gaussians?.length ?? 0;
+	}
+
+	get numGaussiansVisible()
+	{
+		return this.#numGaussiansVisible ?? 0;
+	}
+
+	get performanceProfile()
 	{
 		return this.#latestProfile;
 	}
