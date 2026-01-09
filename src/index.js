@@ -441,6 +441,16 @@ else
 			return this.#segments[0];
 		}
 
+		set viewMatrix(value)
+		{
+			this.#customViewMatrix = value;
+		}
+
+		set projectionMatrix(value)
+		{
+			this.#customProjMatrix = value;
+		}
+
 		//-------------------------//
 
 		#dgs = null;
@@ -456,6 +466,9 @@ else
 		#timeScale = 1.0;
 		#debug = false;
 		#renderParams = {};
+
+		#customViewMatrix = null;
+		#customProjMatrix = null;
 
 		#segments = [];
 		#forceSegmentUpdate = false;
@@ -542,8 +555,8 @@ else
 
 			//create cam/proj matrices:
 			//---------------
-			const view = this.#camera.getViewMatrix(this.#canvas.width / this.#canvas.height);
-			const proj = this.#camera.getProjMatrix(this.#canvas.width / this.#canvas.height);
+			const view = this.#customViewMatrix ?? this.#camera.getViewMatrix(this.#canvas.width / this.#canvas.height);
+			const proj = this.#customProjMatrix ?? this.#camera.getProjMatrix(this.#canvas.width / this.#canvas.height);
 
 			//render:
 			//---------------
