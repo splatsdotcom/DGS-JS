@@ -38,7 +38,7 @@ Here is a full example rendering a single `.dgs` file:
 	</style>
 
 	<script type="module">
-		import "dgs-player";
+		import "dgs-js";
 	</script>
 </head>
 <body>
