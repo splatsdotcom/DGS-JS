@@ -8,7 +8,7 @@ export const DGS = DGSModule();
 
 //-------------------------//
 
-export const adapter = navigator.gpu?.requestAdapter({
+export const adapter = navigator?.gpu?.requestAdapter({
 	powerPreference: 'high-performance'
 });
 
@@ -36,7 +36,7 @@ export const device = adapter?.then(async (adpt) => {
 	return dev;
 });
 
-if(!navigator.gpu)
+if(!navigator?.gpu)
 	console.warn('WebGPU not supported, you will be unable to create <dgs-player>');
 else if(!adapter || !device)
 	throw new Error('WebGPU supported, but failed to create adapter or device!');
